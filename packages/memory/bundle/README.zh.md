@@ -20,11 +20,23 @@ pnpm install
 
 ### 2. 装到你的 dsh profile
 
-```sh
-dsh plugin --profile <你的profile名> add @deepseek-ai/dsh-memory
+包还没发布到 npm，本地用 `link:` 直连 monorepo。编辑 `F:\dsh_workspace\.dsh-home\profiles\<名字>\package.json`（web 和 tui 各一份），在 `dependencies` 加三条 link，并在 `dsh.profile.bundles` 数组末尾追加 bundle 名：
+
+```json
+{
+  "dependencies": {
+    "@deepseek-ai/dsh-memory": "link:F:/dsh_workspace/deepseek-harness/packages/memory/bundle",
+    "@deepseek-ai/dsh-memory-core": "link:F:/dsh_workspace/deepseek-harness/packages/memory/memory-core",
+    "@deepseek-ai/dsh-memory-store": "link:F:/dsh_workspace/deepseek-harness/packages/memory/memory-store"
+  },
+  "dsh": { "profile": { "bundles": ["...", "@deepseek-ai/dsh-memory"] } }
+}
 ```
 
-> 本地开发期如果解析不到 workspace 包，用 pnpm link 或在 profile 的 `package.json` 里以 `file:` 指向 `packages/memory/bundle`。
+然后在每个 profile 目录跑一次 `pnpm install`。
+
+> 前提：仓库已构建过（`pnpm build:lib:host`），插件入口是 `lib/index.js`。以后改了 memory 代码，重新构建即生效，无需重装。
+> 等包发布后，可以直接 `dsh plugin --profile <名字> add @deepseek-ai/dsh-memory` 替代上述手动步骤。
 
 ### 3. （可选）写入人格种子
 
