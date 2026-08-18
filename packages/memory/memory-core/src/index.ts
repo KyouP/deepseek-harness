@@ -11,10 +11,14 @@ import { join } from 'node:path'
 import { MemoryStoreService } from './service.ts'
 import { mountCoreBlocks } from './core-blocks.ts'
 import { registerStoreTools } from './tools-store.ts'
+import { registerRecallTools } from './tools-recall.ts'
 import { mountInjections } from './injections.ts'
 
 export const name = 'memory-core'
 export const inject = ['systemPrompt', 'tools']
+
+/** One-line prompt hint (order 30) telling the model the recall tool exists. */
+export const RECALL_HINT = '长期记忆：需要回忆用户的过往信息时，调用 memory_recall 检索，再用 memory_expand 查看全文。'
 
 /** Memory-core configuration. All fields optional; defaults stay fully local. */
 export interface Config {
@@ -56,7 +60,10 @@ export function apply(ctx: Context, config: Config): void {
   ctx.inject(['memoryStore'], (scope) => {
     mountCoreBlocks(scope, scope.memoryStore, { persona: config.persona, human: config.human })
     registerStoreTools(scope, scope.memoryStore)
+    registerRecallTools(scope, scope.memoryStore)
     mountInjections(scope, scope.memoryStore)
+    // Lightweight static hint; v2 replaces this with automatic recall injection.
+    scope.systemPrompt.context({ name: 'hmem:recall-hint', order: 30, text: () => RECALL_HINT })
   })
 }
 
