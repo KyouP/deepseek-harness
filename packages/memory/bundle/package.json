@@ -9,11 +9,37 @@
     "directory": "packages/memory/bundle"
   },
   "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
   "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
-  "files": ["cordis.patch.yml", "README.md", "README.zh.md"],
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "cordis.patch.yml",
+    "lib/types/**/*.d.ts",
+    "README.md",
+    "README.zh.md"
+  ],
   "license": "MIT",
   "dependencies": {
     "@deepseek-ai/dsh-memory-core": "workspace:^",
     "@deepseek-ai/dsh-memory-store": "workspace:^"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-invariants": "workspace:^"
   }
 }

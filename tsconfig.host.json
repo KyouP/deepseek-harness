@@ -282,6 +282,7 @@
     { "path": "./packages/mcp/mcp-client" },
     { "path": "packages/memory/memory-store" },
     { "path": "packages/memory/memory-core" },
+    { "path": "packages/memory/bundle" },
     { "path": "./packages/host/apiproxy" },
     { "path": "./packages/host/directory-picker" },
     { "path": "./packages/host/directory-picker-auto" },
