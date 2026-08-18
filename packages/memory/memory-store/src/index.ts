@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { SCHEMA_SQL } from './schema.ts'
-import type { Card, DerivedCardPatch, NewCard, SearchHit } from './types.ts'
+import type { Card, DerivedCardPatch, Fact, NewCard, NewFact, SearchHit } from './types.ts'
 
 export type * from './types.ts'
 
@@ -43,6 +43,30 @@ function toCard(row: CardRow): Card {
     pinned: row.pinned === 1, archived: row.archived === 1,
     sessionId: row.session_id, validFrom: row.valid_from,
     validTo: row.valid_to, recordedAt: row.recorded_at,
+  }
+}
+
+interface FactRow {
+  id: string
+  subject: string
+  predicate: string
+  object: string
+  confidence: number
+  source_card: string | null
+  superseded_by: string | null
+  valid_from: string | null
+  valid_to: string | null
+  recorded_at: string
+  pinned: number
+}
+
+function toFact(row: FactRow): Fact {
+  return {
+    id: row.id, subject: row.subject, predicate: row.predicate,
+    object: row.object, confidence: row.confidence, sourceCard: row.source_card,
+    supersededBy: row.superseded_by, validFrom: row.valid_from,
+    validTo: row.valid_to, recordedAt: row.recorded_at,
+    pinned: row.pinned === 1,
   }
 }
 
@@ -118,6 +142,37 @@ export class MemoryStore {
       ORDER BY rank LIMIT ?
     `).all(match, limit) as { id: string; summary: string; rank: number }[]
     return rows
+  }
+
+  /** Insert one immutable fact triple. */
+  insertFact(input: NewFact): Fact {
+    const id = randomUUID()
+    this.db.prepare(`
+      INSERT INTO facts (id, subject, predicate, object, confidence, source_card,
+        valid_from, valid_to, recorded_at, pinned)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id, input.subject, input.predicate, input.object, input.confidence ?? 1,
+      input.sourceCard ?? null, input.validFrom ?? null, input.validTo ?? null,
+      new Date().toISOString(), input.pinned ? 1 : 0,
+    )
+    return toFact(this.db.prepare('SELECT * FROM facts WHERE id = ?').get(id) as FactRow)
+  }
+
+  /** Replace a fact bi-temporally: the old row expires, never mutates in place. */
+  supersedeFact(oldId: string, replacement: NewFact): Fact {
+    const next = this.insertFact(replacement)
+    this.db.prepare('UPDATE facts SET valid_to = ?, superseded_by = ? WHERE id = ?')
+      .run(new Date().toISOString(), next.id, oldId)
+    return next
+  }
+
+  /** Live (non-superseded) facts, optionally narrowed to one subject. */
+  activeFacts(subject?: string): Fact[] {
+    const rows = subject === undefined
+      ? this.db.prepare('SELECT * FROM facts WHERE superseded_by IS NULL').all()
+      : this.db.prepare('SELECT * FROM facts WHERE superseded_by IS NULL AND subject = ?').all(subject)
+    return (rows as FactRow[]).map(toFact)
   }
 }
 
