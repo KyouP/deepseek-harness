@@ -10,7 +10,7 @@
   },
   "type": "module",
   "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
-  "files": ["cordis.patch.yml", "README.md"],
+  "files": ["cordis.patch.yml", "README.md", "README.zh.md"],
   "license": "MIT",
   "dependencies": {
     "@deepseek-ai/dsh-memory-core": "workspace:^",

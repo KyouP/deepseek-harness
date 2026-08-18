@@ -1,5 +1,7 @@
 # @deepseek-ai/dsh-memory
 
+English | [中文](README.zh.md)
+
 The H-MEM persona memory bundle for DeepSeek Harness. Adding this bundle to a
 profile mounts `@deepseek-ai/dsh-memory-core`: a local SQLite-backed long-term
 memory giving the agent two self-editable M1 core blocks (persona / human), an
