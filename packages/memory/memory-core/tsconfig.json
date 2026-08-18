@@ -7,6 +7,7 @@
     { "path": "../../core/system-prompt" },
     { "path": "../../core/tools" },
     { "path": "../../core/session" },
+    { "path": "../../llm/llm" },
     { "path": "../../runtime-diagnostics/invariants" },
     { "path": "../../util/home-paths" },
     { "path": "../memory-store" }

@@ -9,6 +9,7 @@ import z from '@deepseek-ai/schemastery'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { join } from 'node:path'
 import { MemoryStoreService } from './service.ts'
+import { mountCoreBlocks } from './core-blocks.ts'
 
 export const name = 'memory-core'
 export const inject = ['systemPrompt', 'tools']
@@ -40,12 +41,20 @@ export function resolveDbPath(config: Config): string {
 }
 
 /**
- * Mount the memory store service; later tasks register sections and tools here.
+ * Mount the memory store service, then seed and expose the M1 core blocks.
  * @param ctx - plugin context carrying the injected prompt and tool registries.
  * @param config - validated plugin configuration.
  */
 export function apply(ctx: Context, config: Config): void {
   ctx.plugin(MemoryStoreService, resolveDbPath(config))
+  // Cordis guards service access by `inject`: the store is provided by the child
+  // fiber above, so this fiber cannot read `ctx.memoryStore` directly. The
+  // inject scope runs synchronously here (the dependency is already provided)
+  // and unloads the sections/tool automatically if the store is ever disposed.
+  ctx.inject(['memoryStore'], (scope) => {
+    mountCoreBlocks(scope, scope.memoryStore, { persona: config.persona, human: config.human })
+  })
 }
 
 export { MemoryStoreService } from './service.ts'
+export { CoreBlockCache, HUMAN_BLOCK_ORDER, PERSONA_BLOCK_ORDER } from './core-blocks.ts'
