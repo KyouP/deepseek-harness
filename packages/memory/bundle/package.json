@@ -1,0 +1,19 @@
+{
+  "name": "@deepseek-ai/dsh-memory",
+  "description": "H-MEM persona memory bundle for DeepSeek Harness",
+  "version": "0.1.0-rc.7",
+  "publishConfig": { "access": "public" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deepseek-ai/deepseek-harness.git",
+    "directory": "packages/memory/bundle"
+  },
+  "type": "module",
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "files": ["cordis.patch.yml", "README.md"],
+  "license": "MIT",
+  "dependencies": {
+    "@deepseek-ai/dsh-memory-core": "workspace:^",
+    "@deepseek-ai/dsh-memory-store": "workspace:^"
+  }
+}

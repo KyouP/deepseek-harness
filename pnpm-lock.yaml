@@ -5516,6 +5516,15 @@ importers:
         specifier: ^2026.7.4
         version: 2026.7.10(zod@4.4.3)
 
+  packages/memory/bundle:
+    dependencies:
+      '@deepseek-ai/dsh-memory-core':
+        specifier: workspace:^
+        version: link:../memory-core
+      '@deepseek-ai/dsh-memory-store':
+        specifier: workspace:^
+        version: link:../memory-store
+
   packages/memory/memory-core:
     dependencies:
       '@deepseek-ai/dsh-home-paths':
@@ -5534,6 +5543,9 @@ importers:
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-llm':
+        specifier: workspace:^
+        version: link:../../llm/llm
       '@deepseek-ai/dsh-session':
         specifier: workspace:^
         version: link:../../core/session

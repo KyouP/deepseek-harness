@@ -1,0 +1,8 @@
+# The dsh-memory bundle patch: mounts the H-MEM persona memory plugin as one
+# insert row over whatever the earlier bundle layers established. The row's
+# identity is stable; profiles and overlays restate `config` to tune it.
+
+- insert:
+    - id: memory-core
+      name: '@deepseek-ai/dsh-memory-core'
+      config: {}
