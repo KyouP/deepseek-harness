@@ -182,7 +182,7 @@ export class MemoryStore {
       input.sourceCard ?? null, input.validFrom ?? null, input.validTo ?? null,
       new Date().toISOString(), input.pinned ? 1 : 0,
     )
-    return toFact(this.db.prepare('SELECT * FROM facts WHERE id = ?').get(id) as FactRow)
+    return toFact(this.db.prepare('SELECT * FROM facts WHERE id = ?').get(id) as unknown as FactRow)
   }
 
   /** Replace a fact bi-temporally: the old row expires, never mutates in place. */
@@ -205,7 +205,7 @@ export class MemoryStore {
     const rows = subject === undefined
       ? this.db.prepare('SELECT * FROM facts WHERE superseded_by IS NULL').all()
       : this.db.prepare('SELECT * FROM facts WHERE superseded_by IS NULL AND subject = ?').all(subject)
-    return (rows as FactRow[]).map(toFact)
+    return (rows as unknown as FactRow[]).map(toFact)
   }
 
   /** Record one new active commitment. */
@@ -215,7 +215,7 @@ export class MemoryStore {
       INSERT INTO commitments (id, content, promisee, due_at, status, created_at)
       VALUES (?, ?, ?, ?, 'active', ?)
     `).run(id, input.content, input.promisee ?? 'user', input.dueAt ?? null, new Date().toISOString())
-    return toCommitment(this.db.prepare('SELECT * FROM commitments WHERE id = ?').get(id) as CommitmentRow)
+    return toCommitment(this.db.prepare('SELECT * FROM commitments WHERE id = ?').get(id) as unknown as CommitmentRow)
   }
 
   /** Close one commitment with a terminal status. */
@@ -226,7 +226,7 @@ export class MemoryStore {
 
   /** Every commitment still open. */
   activeCommitments(): Commitment[] {
-    const rows = this.db.prepare("SELECT * FROM commitments WHERE status = 'active'").all() as CommitmentRow[]
+    const rows = this.db.prepare("SELECT * FROM commitments WHERE status = 'active'").all() as unknown as CommitmentRow[]
     return rows.map(toCommitment)
   }
 
@@ -234,7 +234,7 @@ export class MemoryStore {
   dueCommitments(now: string): Commitment[] {
     const rows = this.db
       .prepare("SELECT * FROM commitments WHERE status = 'active' AND due_at IS NOT NULL AND due_at <= ?")
-      .all(now) as CommitmentRow[]
+      .all(now) as unknown as CommitmentRow[]
     return rows.map(toCommitment)
   }
 
@@ -253,7 +253,10 @@ export class MemoryStore {
     return this.getCoreBlock(name) as CoreBlock
   }
 
-  /** Precise forgetting: card + FTS (trigger) + derived facts + links, atomically. */
+  /**
+   * Precise forgetting: card + FTS (trigger) + derived facts + links, atomically.
+   * Must not be called inside an outer transaction (uses BEGIN/COMMIT internally).
+   */
   forgetCard(id: string): ForgetReport {
     this.db.exec('BEGIN')
     try {
