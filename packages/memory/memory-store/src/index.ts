@@ -11,7 +11,10 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { SCHEMA_SQL } from './schema.ts'
-import type { Card, DerivedCardPatch, Fact, NewCard, NewFact, SearchHit } from './types.ts'
+import type {
+  Card, Commitment, CoreBlock, DerivedCardPatch, Fact, ForgetReport,
+  NewCard, NewCommitment, NewFact, SearchHit,
+} from './types.ts'
 
 export type * from './types.ts'
 
@@ -68,6 +71,29 @@ function toFact(row: FactRow): Fact {
     validTo: row.valid_to, recordedAt: row.recorded_at,
     pinned: row.pinned === 1,
   }
+}
+
+interface CommitmentRow {
+  id: string
+  content: string
+  promisee: string
+  due_at: string | null
+  status: Commitment['status']
+  created_at: string
+  closed_at: string | null
+}
+
+function toCommitment(row: CommitmentRow): Commitment {
+  return {
+    id: row.id, content: row.content, promisee: row.promisee, dueAt: row.due_at,
+    status: row.status, createdAt: row.created_at, closedAt: row.closed_at,
+  }
+}
+
+interface CoreBlockRow {
+  name: 'persona' | 'human'
+  text: string
+  revision: number
 }
 
 /** The H-MEM database handle. Methods are added by Tasks 2-4. */
@@ -180,6 +206,66 @@ export class MemoryStore {
       ? this.db.prepare('SELECT * FROM facts WHERE superseded_by IS NULL').all()
       : this.db.prepare('SELECT * FROM facts WHERE superseded_by IS NULL AND subject = ?').all(subject)
     return (rows as FactRow[]).map(toFact)
+  }
+
+  /** Record one new active commitment. */
+  addCommitment(input: NewCommitment): Commitment {
+    const id = randomUUID()
+    this.db.prepare(`
+      INSERT INTO commitments (id, content, promisee, due_at, status, created_at)
+      VALUES (?, ?, ?, ?, 'active', ?)
+    `).run(id, input.content, input.promisee ?? 'user', input.dueAt ?? null, new Date().toISOString())
+    return toCommitment(this.db.prepare('SELECT * FROM commitments WHERE id = ?').get(id) as CommitmentRow)
+  }
+
+  /** Close one commitment with a terminal status. */
+  closeCommitment(id: string, status: 'done' | 'cancelled'): void {
+    this.db.prepare('UPDATE commitments SET status = ?, closed_at = ? WHERE id = ?')
+      .run(status, new Date().toISOString(), id)
+  }
+
+  /** Every commitment still open. */
+  activeCommitments(): Commitment[] {
+    const rows = this.db.prepare("SELECT * FROM commitments WHERE status = 'active'").all() as CommitmentRow[]
+    return rows.map(toCommitment)
+  }
+
+  /** Active commitments whose deadline has passed by `now` (ISO string). */
+  dueCommitments(now: string): Commitment[] {
+    const rows = this.db
+      .prepare("SELECT * FROM commitments WHERE status = 'active' AND due_at IS NOT NULL AND due_at <= ?")
+      .all(now) as CommitmentRow[]
+    return rows.map(toCommitment)
+  }
+
+  /** Read one M1 core block, or null when never written. */
+  getCoreBlock(name: 'persona' | 'human'): CoreBlock | null {
+    const row = this.db.prepare('SELECT * FROM core_blocks WHERE name = ?').get(name) as CoreBlockRow | undefined
+    return row ?? null
+  }
+
+  /** Upsert one M1 core block, bumping its revision. */
+  setCoreBlock(name: 'persona' | 'human', text: string): CoreBlock {
+    this.db.prepare(`
+      INSERT INTO core_blocks (name, text, revision) VALUES (?, ?, 1)
+      ON CONFLICT(name) DO UPDATE SET text = excluded.text, revision = core_blocks.revision + 1
+    `).run(name, text)
+    return this.getCoreBlock(name) as CoreBlock
+  }
+
+  /** Precise forgetting: card + FTS (trigger) + derived facts + links, atomically. */
+  forgetCard(id: string): ForgetReport {
+    this.db.exec('BEGIN')
+    try {
+      const facts = this.db.prepare('DELETE FROM facts WHERE source_card = ?').run(id).changes
+      const links = this.db.prepare('DELETE FROM links WHERE src = ? OR dst = ?').run(id, id).changes
+      const cards = this.db.prepare('DELETE FROM cards WHERE id = ?').run(id).changes
+      this.db.exec('COMMIT')
+      return { cards: Number(cards), facts: Number(facts), links: Number(links) }
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      throw err
+    }
   }
 }
 
