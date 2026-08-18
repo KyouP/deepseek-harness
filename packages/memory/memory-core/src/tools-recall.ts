@@ -18,8 +18,7 @@ export function registerRecallTools(ctx: Context, service: MemoryStoreService): 
   ctx.tools.register(defineTool({
     name: 'memory_recall',
     description: 'Search your long-term memory. Returns one-line summaries; call '
-      + 'memory_expand(id) for the full text of any hit. Low-confidence entries are '
-      + 'marked [不确定] — treat them as hints, not facts.',
+      + 'memory_expand(id) for the full text of any hit.',
     parameters: {
       query: { type: 'string', required: true, description: 'Keywords describing what you are trying to remember.' },
       limit: { type: 'integer', description: 'Max results (default 10).' },

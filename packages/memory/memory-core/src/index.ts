@@ -7,6 +7,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
+import { openMemoryStore } from '@deepseek-ai/dsh-memory-store'
+import type { MemoryStore } from '@deepseek-ai/dsh-memory-store'
 import { join } from 'node:path'
 import { MemoryStoreService } from './service.ts'
 import { mountCoreBlocks } from './core-blocks.ts'
@@ -52,7 +54,22 @@ export function resolveDbPath(config: Config): string {
  * @param config - validated plugin configuration.
  */
 export function apply(ctx: Context, config: Config): void {
-  ctx.plugin(MemoryStoreService, resolveDbPath(config))
+  const dbPath = resolveDbPath(config)
+  // Open the store synchronously here, before mounting the service. Cordis
+  // defers plugin-callback errors into an async fiber rejection (logged via
+  // `logger.error`, surfaced only when the fiber is awaited), so a throwing
+  // `openMemoryStore` inside the service constructor could tear down a boot
+  // loader that awaits fibers. Guarding the open here degrades to "no memory"
+  // instead: the service is never provided, so the inject scope below never
+  // runs and no core blocks, tools or injections are mounted.
+  let store: MemoryStore
+  try {
+    store = openMemoryStore(dbPath)
+  } catch (error) {
+    ctx.logger.warn(`memory-core: cannot open memory store at ${dbPath}: ${String(error)}; memory features disabled`)
+    return
+  }
+  ctx.plugin(MemoryStoreService, store)
   // Cordis guards service access by `inject`: the store is provided by the child
   // fiber above, so this fiber cannot read `ctx.memoryStore` directly. The
   // inject scope runs synchronously here (the dependency is already provided)

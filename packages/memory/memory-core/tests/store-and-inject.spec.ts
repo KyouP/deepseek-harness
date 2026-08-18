@@ -2,7 +2,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import SystemPrompt, { renderContextSnapshot } from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
@@ -185,6 +185,27 @@ describe('prompt injection', () => {
     const snapshot = renderContextSnapshot(await ctx.systemPrompt.assemble())
     expect(snapshot).toContain('提醒用户复诊')
     expect(snapshot).toContain('用户今天语速很快')
+    await fiber.dispose()
+  })
+
+  // A store fault must not reject prompt assembly: the guarded providers log a
+  // warning and render empty, so the snapshot simply lacks the memory blocks.
+  it('renders without the memory blocks when the store throws', async () => {
+    const { ctx, fiber } = await setup()
+    const store = ctx.memoryStore.store
+    store.addCommitment({ content: '提醒用户复诊' })
+    store.addNote(null, '用户今天语速很快')
+    const warnings: string[] = []
+    ctx.logger.warn = ((message: unknown) => { warnings.push(String(message)) }) as typeof ctx.logger.warn
+    vi.spyOn(store, 'dueCommitments').mockImplementation(() => { throw new Error('db fault') })
+    vi.spyOn(store, 'recentNotes').mockImplementation(() => { throw new Error('db fault') })
+    const snapshot = renderContextSnapshot(await ctx.systemPrompt.assemble())
+    expect(snapshot).not.toContain('提醒用户复诊')
+    expect(snapshot).not.toContain('用户今天语速很快')
+    expect(snapshot).not.toContain('你承诺过的事')
+    expect(warnings.some(w => w.includes('commitments injection failed'))).toBe(true)
+    expect(warnings.some(w => w.includes('scratchpad injection failed'))).toBe(true)
+    vi.restoreAllMocks()
     await fiber.dispose()
   })
 })

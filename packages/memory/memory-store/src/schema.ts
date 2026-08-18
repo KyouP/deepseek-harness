@@ -1,6 +1,9 @@
 /** DDL for the H-MEM store. Executed wholesale on open; every statement is idempotent. */
 export const SCHEMA_SQL = `
 PRAGMA journal_mode = WAL;
+-- Wait up to 2s on a locked database instead of failing immediately: two
+-- harness instances may share one hmem.db under WAL.
+PRAGMA busy_timeout = 2000;
 
 CREATE TABLE IF NOT EXISTS cards (
   id            TEXT PRIMARY KEY,

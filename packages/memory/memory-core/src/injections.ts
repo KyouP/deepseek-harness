@@ -46,7 +46,10 @@ export function buildScratchpadText(store: MemoryStore): string {
 }
 
 /**
- * Mount the two dynamic context providers.
+ * Mount the two dynamic context providers. Each provider guards its SQLite
+ * reads: a store fault (e.g. a closed or corrupted database) must not reject
+ * prompt assembly, so on error it logs once per failure and renders empty —
+ * the persona stays online without the memory block.
  * @param ctx - inject scope carrying the system prompt service.
  * @param service - the memory store service.
  */
@@ -54,11 +57,25 @@ export function mountInjections(ctx: Context, service: MemoryStoreService): void
   ctx.systemPrompt.context({
     name: 'hmem:commitments',
     order: 10,
-    text: () => buildCommitmentsText(service.store),
+    text: () => {
+      try {
+        return buildCommitmentsText(service.store)
+      } catch (error) {
+        ctx.logger.warn(`memory-core: commitments injection failed: ${String(error)}`)
+        return ''
+      }
+    },
   })
   ctx.systemPrompt.context({
     name: 'hmem:scratchpad',
     order: 20,
-    text: () => buildScratchpadText(service.store),
+    text: () => {
+      try {
+        return buildScratchpadText(service.store)
+      } catch (error) {
+        ctx.logger.warn(`memory-core: scratchpad injection failed: ${String(error)}`)
+        return ''
+      }
+    },
   })
 }

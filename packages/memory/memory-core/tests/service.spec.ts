@@ -1,5 +1,5 @@
 // packages/memory/memory-core/tests/service.spec.ts
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -35,5 +35,25 @@ describe('memory-core service', () => {
 
   it('resolves the default database path under the harness home when dbPath is empty', () => {
     expect(memory.resolveDbPath({})).toBe(join(dshHomePath('storages'), 'hmem.db'))
+  })
+
+  // A dbPath whose parent is an existing FILE makes mkdirSync fail, so
+  // openMemoryStore throws. The plugin must still mount: the store open is
+  // guarded in apply(), the service is never provided, and the inject scope
+  // (core blocks, tools, injections) simply never runs.
+  it('boots without the memoryStore service when the database cannot be opened', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'hmem-'))
+    writeFileSync(join(dir, 'blocker'), 'not a directory')
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    const warnings: string[] = []
+    ctx.logger.warn = ((message: unknown) => { warnings.push(String(message)) }) as typeof ctx.logger.warn
+    const fiber = await ctx.plugin(memory, { dbPath: join(dir, 'blocker', 'hmem.db') })
+    expect(warnings.some(w => w.includes('memory-core: cannot open memory store'))).toBe(true)
+    expect(ctx.get('memoryStore')).toBeUndefined()
+    expect(ctx.tools.get('memory_recall')).toBeUndefined()
+    expect(ctx.tools.get('memory_store')).toBeUndefined()
+    await fiber.dispose()
   })
 })
