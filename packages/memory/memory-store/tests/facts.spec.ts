@@ -20,12 +20,27 @@ describe('facts', () => {
     const old = store.insertFact({ subject: 'user', predicate: 'preference.editor', object: 'vim' })
     const next = store.supersedeFact(old.id, { subject: 'user', predicate: 'preference.editor', object: 'vscode' })
     const active = store.activeFacts('user')
+    expect(active).toHaveLength(1)
     expect(active.map(f => f.id)).toEqual([next.id])
     // 旧行仍在，且带失效标记（双时间验证可查旧版）
     const rows = store.db.prepare('SELECT superseded_by, valid_to FROM facts WHERE id = ?')
       .get(old.id) as { superseded_by: string | null; valid_to: string | null }
     expect(rows.superseded_by).toBe(next.id)
     expect(rows.valid_to).toBeTruthy()
+  })
+
+  it('rolls back the whole supersede when the replacement insert fails', () => {
+    const old = store.insertFact({ subject: 'user', predicate: 'preference.editor', object: 'vim' })
+    expect(() => store.supersedeFact(old.id, {
+      subject: 'user', predicate: 'preference.editor', object: null as never,
+    })).toThrow()
+    // ROLLBACK 生效：旧事实仍然存活，且没有遗留的新行
+    const active = store.activeFacts('user')
+    expect(active.map(f => f.id)).toEqual([old.id])
+    const rows = store.db.prepare('SELECT superseded_by, valid_to FROM facts WHERE id = ?')
+      .get(old.id) as { superseded_by: string | null; valid_to: string | null }
+    expect(rows.superseded_by).toBeNull()
+    expect(rows.valid_to).toBeNull()
   })
 
   it('activeFacts without subject returns every live fact', () => {

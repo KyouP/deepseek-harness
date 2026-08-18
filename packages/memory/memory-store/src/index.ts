@@ -161,10 +161,17 @@ export class MemoryStore {
 
   /** Replace a fact bi-temporally: the old row expires, never mutates in place. */
   supersedeFact(oldId: string, replacement: NewFact): Fact {
-    const next = this.insertFact(replacement)
-    this.db.prepare('UPDATE facts SET valid_to = ?, superseded_by = ? WHERE id = ?')
-      .run(new Date().toISOString(), next.id, oldId)
-    return next
+    this.db.exec('BEGIN')
+    try {
+      const next = this.insertFact(replacement)
+      this.db.prepare('UPDATE facts SET valid_to = ?, superseded_by = ? WHERE id = ?')
+        .run(new Date().toISOString(), next.id, oldId)
+      this.db.exec('COMMIT')
+      return next
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      throw err
+    }
   }
 
   /** Live (non-superseded) facts, optionally narrowed to one subject. */
