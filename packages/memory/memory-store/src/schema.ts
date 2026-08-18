@@ -58,6 +58,13 @@ CREATE TABLE IF NOT EXISTS core_blocks (
   revision INTEGER NOT NULL DEFAULT 1
 ) STRICT;
 
+CREATE TABLE IF NOT EXISTS scratchpad (
+  id         TEXT PRIMARY KEY,
+  session_id TEXT,
+  text       TEXT NOT NULL,
+  created_at TEXT NOT NULL
+) STRICT;
+
 CREATE VIRTUAL TABLE IF NOT EXISTS cards_fts USING fts5(
   summary, content, keywords,
   content='cards', content_rowid='rowid', tokenize='unicode61'

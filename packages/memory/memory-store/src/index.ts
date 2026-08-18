@@ -96,6 +96,19 @@ interface CoreBlockRow {
   revision: number
 }
 
+/** One scratchpad note. */
+export interface Note {
+  id: string
+  text: string
+  createdAt: string
+}
+
+interface NoteRow {
+  id: string
+  text: string
+  created_at: string
+}
+
 /** The H-MEM database handle. Methods are added by Tasks 2-4. */
 export class MemoryStore {
   constructor(/** exposed for tests only */ readonly db: DatabaseSync) {}
@@ -251,6 +264,21 @@ export class MemoryStore {
       ON CONFLICT(name) DO UPDATE SET text = excluded.text, revision = core_blocks.revision + 1
     `).run(name, text)
     return this.getCoreBlock(name) as CoreBlock
+  }
+
+  /** Append one scratchpad note for a session (or global when null). */
+  addNote(sessionId: string | null, text: string): void {
+    this.db.prepare('INSERT INTO scratchpad (id, session_id, text, created_at) VALUES (?, ?, ?, ?)')
+      .run(randomUUID(), sessionId, text, new Date().toISOString())
+  }
+
+  /** Notes created at or after `sinceIso`, oldest first, capped at `limit`. */
+  recentNotes(sinceIso: string, limit = 20): Note[] {
+    const rows = this.db.prepare(
+      // rowid breaks created_at ties (millisecond resolution) deterministically.
+      'SELECT id, text, created_at FROM scratchpad WHERE created_at >= ? ORDER BY created_at DESC, rowid DESC LIMIT ?',
+    ).all(sinceIso, limit) as unknown as NoteRow[]
+    return rows.reverse().map(r => ({ id: r.id, text: r.text, createdAt: r.created_at }))
   }
 
   /**

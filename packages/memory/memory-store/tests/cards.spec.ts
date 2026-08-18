@@ -42,7 +42,7 @@ describe('cards', () => {
 
   it('rejects non-whitelisted derived updates', () => {
     const card = store.insertCard({ summary: 's', content: 'c' })
-    expect(() => store.updateCardDerived(card.id, { summary: 'evil' } as never)).toThrow(/whitelist/)
+    expect(() => { store.updateCardDerived(card.id, { summary: 'evil' } as never) }).toThrow(/whitelist/)
   })
 
   it('returns null for an unknown card id', () => {

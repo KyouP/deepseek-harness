@@ -10,6 +10,8 @@ import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { join } from 'node:path'
 import { MemoryStoreService } from './service.ts'
 import { mountCoreBlocks } from './core-blocks.ts'
+import { registerStoreTools } from './tools-store.ts'
+import { mountInjections } from './injections.ts'
 
 export const name = 'memory-core'
 export const inject = ['systemPrompt', 'tools']
@@ -53,6 +55,8 @@ export function apply(ctx: Context, config: Config): void {
   // and unloads the sections/tool automatically if the store is ever disposed.
   ctx.inject(['memoryStore'], (scope) => {
     mountCoreBlocks(scope, scope.memoryStore, { persona: config.persona, human: config.human })
+    registerStoreTools(scope, scope.memoryStore)
+    mountInjections(scope, scope.memoryStore)
   })
 }
 
