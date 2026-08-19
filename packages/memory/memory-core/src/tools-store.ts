@@ -25,9 +25,13 @@ export function registerStoreTools(ctx: Context, service: MemoryStoreService): v
   ctx.tools.register(defineTool({
     name: 'memory_store',
     description: 'Explicitly remember something, permanently. Use when the user says '
-      + '"remember this" / "别忘了" or when you make a promise. Pinned memories never '
-      + 'decay. Set type=commitment (with optional ISO `due`) for promises and agreed '
-      + 'follow-ups; commitments stay pinned in context until closed.',
+      + '"remember this" / "别忘了". Choose `type` carefully: memory (default) records '
+      + 'a fact, preference, event or state about the user or world to recall later; '
+      + 'commitment is ONLY for an open promise you made to do something (optionally '
+      + 'with ISO `due`) — it stays pinned in context until closed, so never use it '
+      + 'just to record what the user told you. Pinned memories never decay. Before '
+      + 'storing again, check memory_recall — the store deduplicates identical '
+      + 'commitments but repeated memories create noise.',
     parameters: {
       content: { type: 'string', required: true, description: 'What to remember, in one self-contained sentence.' },
       type: { type: 'string', enum: ['memory', 'commitment'], description: 'memory (default) | commitment.' },

@@ -78,4 +78,39 @@ describe('cards', () => {
     expect(store.searchCardsFts('')).toEqual([])
     expect(store.searchCardsFts('   ')).toEqual([])
   })
+
+  it('finds CJK mid-token queries through the substring fallback', () => {
+    const card = store.insertCard({
+      summary: '主人身体不太好',
+      content: '主人Orasio身体不太好，需要经常被提醒多运动、多喝水',
+    })
+    // 身体 sits in the middle of the indexed CJK run: FTS prefix can never
+    // match it, only the LIKE fallback can.
+    expect(store.searchCardsFts('身体').map(h => h.id)).toEqual([card.id])
+    expect(store.searchCardsFts('运动').map(h => h.id)).toEqual([card.id])
+  })
+
+  it('merges fallback hits after FTS hits without duplicating them', () => {
+    const ftsHit = store.insertCard({ summary: '运动计划', content: '每周三次' })
+    const likeOnly = store.insertCard({ summary: '健康提醒', content: '主人需要多运动多喝水' })
+    const hits = store.searchCardsFts('运动')
+    expect(hits.map(h => h.id)).toEqual([ftsHit.id, likeOnly.id])
+    // A prefix-matching query whose card also substring-matches stays one row.
+    expect(store.searchCardsFts('运动计划')).toHaveLength(1)
+  })
+
+  it('excludes archived cards from the substring fallback too', () => {
+    const card = store.insertCard({ summary: '健康', content: '主人需要多运动' })
+    store.updateCardDerived(card.id, { archived: true })
+    expect(store.searchCardsFts('运动')).toEqual([])
+  })
+
+  it('caps merged FTS + fallback results at the requested limit', () => {
+    const ftsHit = store.insertCard({ summary: '运动计划', content: '每周三次' })
+    store.insertCard({ summary: '提醒一', content: '主人需要多运动' })
+    store.insertCard({ summary: '提醒二', content: '久坐后要做运动拉伸' })
+    const hits = store.searchCardsFts('运动', 2)
+    expect(hits).toHaveLength(2)
+    expect(hits[0]!.id).toBe(ftsHit.id)
+  })
 })

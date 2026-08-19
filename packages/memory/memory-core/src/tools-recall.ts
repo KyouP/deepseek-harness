@@ -18,9 +18,12 @@ export function registerRecallTools(ctx: Context, service: MemoryStoreService): 
   ctx.tools.register(defineTool({
     name: 'memory_recall',
     description: 'Search your long-term memory. Returns one-line summaries; call '
-      + 'memory_expand(id) for the full text of any hit.',
+      + 'memory_expand(id) for the full text of any hit. Query tips: use one or two '
+      + 'distinctive keywords as they likely appear in the memory (Chinese substring '
+      + 'matching works, e.g. 身体 finds 主人身体不太好); a full rephrased question is '
+      + 'a worse query than a keyword.',
     parameters: {
-      query: { type: 'string', required: true, description: 'Keywords describing what you are trying to remember.' },
+      query: { type: 'string', required: true, description: 'One or two distinctive keywords, not a full sentence.' },
       limit: { type: 'integer', description: 'Max results (default 10).' },
     },
     output: {

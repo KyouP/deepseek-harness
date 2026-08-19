@@ -42,4 +42,19 @@ describe('commitments', () => {
     expect(row.status).toBe('done')
     expect(row.closed_at).toBeTruthy()
   })
+
+  it('returns the existing row instead of duplicating identical active content', () => {
+    const first = store.addCommitment({ content: '提醒主人多运动' })
+    const again = store.addCommitment({ content: '提醒主人多运动' })
+    expect(again.id).toBe(first.id)
+    expect(store.activeCommitments()).toHaveLength(1)
+  })
+
+  it('inserts a fresh row when the identical commitment was already closed', () => {
+    const first = store.addCommitment({ content: '提醒主人多喝水' })
+    store.closeCommitment(first.id, 'done')
+    const second = store.addCommitment({ content: '提醒主人多喝水' })
+    expect(second.id).not.toBe(first.id)
+    expect(store.activeCommitments()).toHaveLength(1)
+  })
 })

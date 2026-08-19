@@ -167,11 +167,17 @@ export class MemoryStore {
     this.db.prepare(`UPDATE cards SET ${sets.join(', ')} WHERE id = ?`).run(...vals)
   }
 
-  /** Full-text search over live cards, bm25 ascending (most relevant first). */
+  /**
+   * Full-text search over live cards, bm25 ascending (most relevant first).
+   * CJK queries get a substring fallback merged in: unicode61 treats a whole
+   * CJK run as one token, so a word from the middle of a Chinese sentence
+   * never prefix-matches the FTS index — LIKE has no such constraint.
+   */
   searchCardsFts(query: string, limit = 50): SearchHit[] {
     // Prefix-match each token: unicode61 never splits CJK runs, so a query
     // like 深色模式 must match the longer indexed token 深色模式偏好.
-    const match = query.split(/\s+/).filter(Boolean)
+    const terms = query.split(/\s+/).filter(Boolean)
+    const match = terms
       .map(t => `"${t.replace(/"/g, '')}"*`).join(' OR ')
     if (!match) return []
     const rows = this.db.prepare(`
@@ -180,6 +186,20 @@ export class MemoryStore {
       WHERE cards_fts MATCH ? AND c.archived = 0
       ORDER BY rank LIMIT ?
     `).all(match, limit) as { id: string; summary: string; rank: number }[]
+    if (!/[㐀-鿿豈-﫿]/.test(query) || rows.length >= limit) return rows
+    const seen = new Set(rows.map(r => r.id))
+    const like = terms.map(() => '(c.summary LIKE ? OR c.content LIKE ?)').join(' OR ')
+    const params = terms.flatMap((t) => {
+      const safe = `%${t.replace(/[%_]/g, '')}%`
+      return [safe, safe]
+    })
+    const extra = this.db.prepare(`
+      SELECT c.id AS id, c.summary AS summary FROM cards c
+      WHERE c.archived = 0 AND (${like}) LIMIT ?
+    `).all(...params, limit) as { id: string; summary: string }[]
+    for (const row of extra.filter(r => !seen.has(r.id)).slice(0, limit - rows.length)) {
+      rows.push({ id: row.id, summary: row.summary, rank: Number.POSITIVE_INFINITY })
+    }
     return rows
   }
 
@@ -222,7 +242,16 @@ export class MemoryStore {
   }
 
   /** Record one new active commitment. */
+  /**
+   * Add one open commitment. Idempotent for identical content: if an active
+   * commitment with the same text already exists, it is returned instead of
+   * inserting a duplicate (models re-store when a recall attempt fails).
+   */
   addCommitment(input: NewCommitment): Commitment {
+    const existing = this.db.prepare(
+      "SELECT * FROM commitments WHERE status = 'active' AND content = ?",
+    ).get(input.content) as unknown as CommitmentRow | undefined
+    if (existing) return toCommitment(existing)
     const id = randomUUID()
     this.db.prepare(`
       INSERT INTO commitments (id, content, promisee, due_at, status, created_at)
