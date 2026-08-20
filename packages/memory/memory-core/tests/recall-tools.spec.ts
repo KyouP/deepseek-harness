@@ -60,16 +60,42 @@ describe('recall tools', () => {
     const tool = ctx.tools.get('memory_recall')!
     const hit = tool.output.render({ query: '偏好' }, {
       results: [
-        { id: 'a', summary: '确定记忆', uncertain: false },
-        { id: 'b', summary: '含糊记忆', uncertain: true },
+        { id: 'a', summary: '确定记忆', kind: 'card', uncertain: false },
+        { id: 'b', summary: '含糊记忆', kind: 'card', uncertain: true },
+        { id: 'c', summary: '主人 职业 → 工程师', kind: 'fact', uncertain: true },
       ],
     })
-    expect(hit).toEqual([{ type: 'text', text: '- [a] 确定记忆\n- [b] [不确定] 含糊记忆' }])
+    expect(hit).toEqual([{
+      type: 'text',
+      text: '- [a] 确定记忆\n- [b] [不确定] 含糊记忆\n- [c] [不确定] [事实] 主人 职业 → 工程师',
+    }])
     // Empty render arm, exercised through a real no-hit recall.
     const empty = await call(ctx, 'memory_recall', { query: '词xyzzy' })
     expect((empty as { value: { results: unknown[] } }).value.results).toHaveLength(0)
     expect(tool.output.render({ query: '词xyzzy' }, { results: [] }))
       .toEqual([{ type: 'text', text: 'No memories found.' }])
+    await fiber.dispose()
+  })
+
+  it('memory_recall surfaces facts with kind=fact and deep revives archived cards', async () => {
+    const { ctx, fiber } = await setup()
+    // The root context may read the service (the plugin's own fiber cannot).
+    const store = ctx.memoryStore.store
+
+    store.insertFact({ subject: '主人', predicate: '职业', object: '工程师', confidence: 0.5 })
+    const factResult = await call(ctx, 'memory_recall', { query: '职业' })
+    const factValue = (factResult as { value: { results: { kind: string; uncertain: boolean }[] } }).value
+    expect(factValue.results[0]).toMatchObject({ kind: 'fact', uncertain: true })
+
+    const card = store.insertCard({ summary: '深海档案馆的tool级秘密条目', content: '深海档案馆的tool级秘密条目 全文' })
+    store.updateCardDerived(card.id, { archived: true, strength: 0.1 })
+    const shallow = await call(ctx, 'memory_recall', { query: '深海档案馆' })
+    expect((shallow as { value: { results: unknown[] } }).value.results).toHaveLength(0)
+    const deep = await call(ctx, 'memory_recall', { query: '深海档案馆', deep: true })
+    const deepValue = (deep as { value: { results: { id: string; kind: string }[] } }).value
+    expect(deepValue.results.map(r => r.id)).toEqual([card.id])
+    expect(deepValue.results[0]!.kind).toBe('card')
+    expect(store.getCard(card.id)!.archived).toBe(false)
     await fiber.dispose()
   })
 

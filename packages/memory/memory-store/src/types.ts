@@ -134,6 +134,12 @@ export interface SearchHit {
   rank: number
 }
 
+/** Options for the card search channels ({@link MemoryStore.searchCardsFts} / searchCardsTri). */
+export interface CardSearchOptions {
+  /** Also search archived cards (deep recall); default false. */
+  includeArchived?: boolean
+}
+
 /** Counts reported by {@link MemoryStore.forgetCard}. */
 export interface ForgetReport {
   cards: number

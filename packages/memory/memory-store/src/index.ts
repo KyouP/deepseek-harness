@@ -13,7 +13,7 @@ import { dirname } from 'node:path'
 import { SCHEMA_SQL } from './schema.ts'
 import { migrate } from './migrations.ts'
 import type {
-  Card, Commitment, CoreBlock, DerivedCardPatch, Fact, ForgetReport,
+  Card, CardSearchOptions, Commitment, CoreBlock, DerivedCardPatch, Fact, ForgetReport,
   MemoryDump, NewCard, NewCommitment, NewFact, NewSuggestion, Note, SearchHit,
   Suggestion,
 } from './types.ts'
@@ -189,10 +189,12 @@ export class MemoryStore {
    * CJK queries get a substring fallback merged in: unicode61 treats a whole
    * CJK run as one token, so a word from the middle of a Chinese sentence
    * never prefix-matches the FTS index — LIKE has no such constraint.
+   * `opts.includeArchived` widens every channel to archived cards (deep recall).
    */
-  searchCardsFts(query: string, limit = 50): SearchHit[] {
+  searchCardsFts(query: string, limit = 50, opts: CardSearchOptions = {}): SearchHit[] {
     // Prefix-match each token: unicode61 never splits CJK runs, so a query
     // like 深色模式 must match the longer indexed token 深色模式偏好.
+    const live = opts.includeArchived ? '1 = 1' : 'c.archived = 0'
     const terms = query.split(/\s+/).filter(Boolean)
     const match = terms
       .map(t => `"${t.replace(/"/g, '')}"*`).join(' OR ')
@@ -200,7 +202,7 @@ export class MemoryStore {
     const rows = this.db.prepare(`
       SELECT c.id AS id, c.summary AS summary, bm25(cards_fts) AS rank
       FROM cards_fts JOIN cards c ON c.rowid = cards_fts.rowid
-      WHERE cards_fts MATCH ? AND c.archived = 0
+      WHERE cards_fts MATCH ? AND ${live}
       ORDER BY rank LIMIT ?
     `).all(match, limit) as { id: string; summary: string; rank: number }[]
     if (!/[㐀-鿿豈-﫿]/.test(query) || rows.length >= limit) return rows
@@ -212,7 +214,7 @@ export class MemoryStore {
     })
     const extra = this.db.prepare(`
       SELECT c.id AS id, c.summary AS summary FROM cards c
-      WHERE c.archived = 0 AND (${like}) LIMIT ?
+      WHERE ${live} AND (${like}) LIMIT ?
     `).all(...params, limit) as { id: string; summary: string }[]
     for (const row of extra.filter(r => !seen.has(r.id)).slice(0, limit - rows.length)) {
       rows.push({ id: row.id, summary: row.summary, rank: Number.POSITIVE_INFINITY })
@@ -226,8 +228,10 @@ export class MemoryStore {
    * infix of ≥3 characters, so mid-sentence CJK terms hit directly. Shorter
    * terms (common for two-character CJK words) cannot be trigram-indexed, so
    * they fall back to a LIKE substring scan, merged after FTS hits.
+   * `opts.includeArchived` widens every channel to archived cards (deep recall).
    */
-  searchCardsTri(query: string, limit = 50): SearchHit[] {
+  searchCardsTri(query: string, limit = 50, opts: CardSearchOptions = {}): SearchHit[] {
+    const live = opts.includeArchived ? '1 = 1' : 'c.archived = 0'
     const terms = query.split(/\s+/).filter(Boolean)
     const indexed = terms.filter(t => [...t].length >= 3)
     const short = terms.filter(t => [...t].length < 3)
@@ -237,7 +241,7 @@ export class MemoryStore {
       rows.push(...(this.db.prepare(`
         SELECT c.id AS id, c.summary AS summary, bm25(cards_fts_tri) AS rank
         FROM cards_fts_tri JOIN cards c ON c.rowid = cards_fts_tri.rowid
-        WHERE cards_fts_tri MATCH ? AND c.archived = 0
+        WHERE cards_fts_tri MATCH ? AND ${live}
         ORDER BY rank LIMIT ?
       `).all(match, limit) as unknown as SearchHit[]))
     }
@@ -251,7 +255,7 @@ export class MemoryStore {
       })
       const extra = this.db.prepare(`
         SELECT c.id AS id, c.summary AS summary FROM cards c
-        WHERE c.archived = 0 AND (${like}) LIMIT ?
+        WHERE ${live} AND (${like}) LIMIT ?
       `).all(...params, limit) as { id: string; summary: string }[]
       for (const row of extra.filter(r => !seen.has(r.id)).slice(0, limit - rows.length)) {
         rows.push({ id: row.id, summary: row.summary, rank: Number.POSITIVE_INFINITY })

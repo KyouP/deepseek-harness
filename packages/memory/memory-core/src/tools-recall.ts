@@ -1,13 +1,14 @@
 /**
- * Read-path memory tools: `memory_recall` (v1: FTS5 single-channel),
- * `memory_expand` and `memory_forget`. Registered inside the memory-core
- * inject scope so they unload with the store service.
+ * Read-path memory tools: `memory_recall` (v2: ranked multi-channel recall,
+ * see recall.ts), `memory_expand` and `memory_forget`. Registered inside the
+ * memory-core inject scope so they unload with the store service.
  * @module
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { MemoryStoreService } from './service.ts'
+import { rankedRecall } from './recall.ts'
 
 /**
  * Register the read-path tools: `memory_recall`, `memory_expand`, `memory_forget`.
@@ -21,10 +22,12 @@ export function registerRecallTools(ctx: Context, service: MemoryStoreService): 
       + 'memory_expand(id) for the full text of any hit. Query tips: use one or two '
       + 'distinctive keywords as they likely appear in the memory (Chinese substring '
       + 'matching works, e.g. 身体 finds 主人身体不太好); a full rephrased question is '
-      + 'a worse query than a keyword.',
+      + 'a worse query than a keyword. Results marked [不确定] are low-confidence. '
+      + 'Set deep=true to also search faded (archived) memories and revive hits.',
     parameters: {
       query: { type: 'string', required: true, description: 'One or two distinctive keywords, not a full sentence.' },
       limit: { type: 'integer', description: 'Max results (default 10).' },
+      deep: { type: 'boolean', description: 'Also search archived (faded) memories; hits are revived.' },
     },
     output: {
       schema: {
@@ -37,6 +40,7 @@ export function registerRecallTools(ctx: Context, service: MemoryStoreService): 
               properties: {
                 id: { type: 'string', required: true },
                 summary: { type: 'string', required: true },
+                kind: { type: 'string', required: true, description: "'card' or 'fact'." },
                 uncertain: { type: 'boolean', required: true },
               },
             },
@@ -47,13 +51,18 @@ export function registerRecallTools(ctx: Context, service: MemoryStoreService): 
         type: 'text',
         text: value.results.length === 0
           ? 'No memories found.'
-          : value.results.map(r => `- [${r.id}] ${r.uncertain ? '[不确定] ' : ''}${r.summary}`).join('\n'),
+          : value.results.map(r =>
+            `- [${r.id}] ${r.uncertain ? '[不确定] ' : ''}${r.kind === 'fact' ? '[事实] ' : ''}${r.summary}`,
+          ).join('\n'),
       }],
     },
     execute(args) {
-      const hits = service.store.searchCardsFts(args.query, args.limit ?? 10)
+      const hits = rankedRecall(service.store, args.query, {
+        limit: args.limit ?? 10,
+        deep: args.deep ?? false,
+      })
       return Promise.resolve({
-        results: hits.map(h => ({ id: h.id, summary: h.summary, uncertain: false })),
+        results: hits.map(h => ({ id: h.id, summary: h.summary, kind: h.kind, uncertain: h.uncertain })),
       })
     },
     presentCall: args => ({ card: 'generic', title: 'Recall memory', kind: 'read', rawInput: args }),

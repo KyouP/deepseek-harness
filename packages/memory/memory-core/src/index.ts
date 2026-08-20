@@ -206,3 +206,5 @@ export function apply(ctx: Context, config: Config): void {
 export { MemoryStoreService } from './service.ts'
 export { CoreBlockCache, HUMAN_BLOCK_ORDER, PERSONA_BLOCK_ORDER } from './core-blocks.ts'
 export { TRUNCATION_MARKER, budgetText, truncateChars } from './budget.ts'
+export { rankedRecall } from './recall.ts'
+export type { RankedHit, RankedRecallOptions } from './recall.ts'

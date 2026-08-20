@@ -105,6 +105,25 @@ describe('cards', () => {
     expect(store.searchCardsFts('运动')).toEqual([])
   })
 
+  it('excludes archived cards from every channel unless includeArchived is set', () => {
+    const card = store.insertCard({
+      summary: '归档的长跑训练笔记',
+      content: '长距离越野跑训练记录，包含幻星补给策略',
+    })
+    store.updateCardDerived(card.id, { archived: true })
+    // FTS prefix channel (归档 prefixes the indexed CJK run).
+    expect(store.searchCardsFts('归档')).toEqual([])
+    expect(store.searchCardsFts('归档', 50, { includeArchived: true }).map(h => h.id)).toEqual([card.id])
+    // Trigram infix channel (≥3 characters).
+    expect(store.searchCardsTri('越野跑训练')).toEqual([])
+    expect(store.searchCardsTri('越野跑训练', 50, { includeArchived: true }).map(h => h.id)).toEqual([card.id])
+    // LIKE substring fallback (short CJK term, mid-run).
+    expect(store.searchCardsFts('幻星')).toEqual([])
+    expect(store.searchCardsFts('幻星', 50, { includeArchived: true }).map(h => h.id)).toEqual([card.id])
+    expect(store.searchCardsTri('幻星')).toEqual([])
+    expect(store.searchCardsTri('幻星', 50, { includeArchived: true }).map(h => h.id)).toEqual([card.id])
+  })
+
   it('caps merged FTS + fallback results at the requested limit', () => {
     const ftsHit = store.insertCard({ summary: '运动计划', content: '每周三次' })
     store.insertCard({ summary: '提醒一', content: '主人需要多运动' })
