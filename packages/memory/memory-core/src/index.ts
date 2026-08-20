@@ -19,6 +19,7 @@ import { mountInjections } from './injections.ts'
 import type { LlmConfig, LlmStreamLike } from './llm.ts'
 import { createBackend } from './llm.ts'
 import { Sedimenter, type AgentLike } from './sediment.ts'
+import { mountAutoRecall } from './auto-recall.ts'
 
 export const name = 'memory-core'
 export const inject = ['systemPrompt', 'tools']
@@ -182,6 +183,13 @@ export function apply(ctx: Context, config: Config): void {
     // v1 dynamic recall-hint context.
     scope.systemPrompt.section({ name: 'hmem:discipline', order: 5, text: MEMORY_DISCIPLINE })
 
+    // Automatic per-turn recall injection (FR-4.8): a pre-step listener
+    // refreshes the recall block from the latest user text (synchronous local
+    // SQLite — no LLM — so it stays within the NFR-1.3 hot-path budget), and
+    // the hmem:recall context provider renders it. recallAutoInject=false
+    // turns both halves into no-ops.
+    mountAutoRecall(scope, scope.memoryStore.store, config)
+
     // Warm-path auto sedimentation (FR-3.5/FR-6.5): after each turn closes,
     // distill its memorable items through the LLM backend and route them into
     // the store. Fire-and-forget — the hook never blocks the turn stop.
@@ -208,3 +216,5 @@ export { CoreBlockCache, HUMAN_BLOCK_ORDER, PERSONA_BLOCK_ORDER } from './core-b
 export { TRUNCATION_MARKER, budgetText, truncateChars } from './budget.ts'
 export { rankedRecall } from './recall.ts'
 export type { RankedHit, RankedRecallOptions } from './recall.ts'
+export { AutoRecall, mountAutoRecall, RECALL_BLOCK_HEADER } from './auto-recall.ts'
+export type { AutoRecallConfig, AutoRecallLogger } from './auto-recall.ts'
