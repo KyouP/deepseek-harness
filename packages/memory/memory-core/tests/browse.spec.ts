@@ -61,6 +61,20 @@ describe('parseSessionJsonl', () => {
     expect(s.cwd).toBeNull()
     expect(s.messages).toEqual([{ role: 'user', text: '甲乙' }, { role: 'assistant', text: '答' }])
   })
+
+  it('breaks the assistant run when a non-text record intervenes between deltas', () => {
+    const text = [
+      JSON.stringify(header('s3', '2026-08-03T00:00:00Z')),
+      JSON.stringify({ type: 'assistant/chunk', data: { chunk: { type: 'text-delta', text: '前半' } } }),
+      JSON.stringify({ type: 'step/start', data: { turn: 1, step: 2 } }),
+      JSON.stringify({ type: 'assistant/chunk', data: { chunk: { type: 'text-delta', text: '后半' } } }),
+    ].join('\n')
+    const s = parseSessionJsonl(text)!
+    expect(s.messages).toEqual([
+      { role: 'assistant', text: '前半' },
+      { role: 'assistant', text: '后半' },
+    ])
+  })
 })
 
 describe('browseSessions', () => {

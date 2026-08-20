@@ -124,6 +124,11 @@ export function parseSessionJsonl(text: string): ParsedSession | null {
       if (Array.isArray(texts)) {
         for (const t of texts) if (typeof t === 'string') pendingAssistant += t
       }
+    } else {
+      // Any other record (tool calls, step/turn markers, non-text chunks)
+      // breaks the assistant run: deltas separated by intervening events must
+      // NOT merge into one message.
+      flushAssistant()
     }
   }
   flushAssistant()
