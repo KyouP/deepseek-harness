@@ -16,7 +16,9 @@ import { registerStoreTools } from './tools-store.ts'
 import { registerRecallTools } from './tools-recall.ts'
 import { registerCommitmentTools } from './tools-commitments.ts'
 import { mountInjections } from './injections.ts'
-import type { LlmConfig } from './llm.ts'
+import type { LlmConfig, LlmStreamLike } from './llm.ts'
+import { createBackend } from './llm.ts'
+import { Sedimenter, type AgentLike } from './sediment.ts'
 
 export const name = 'memory-core'
 export const inject = ['systemPrompt', 'tools']
@@ -179,6 +181,25 @@ export function apply(ctx: Context, config: Config): void {
     // Static discipline section (constant text, byte-stable); it replaces the
     // v1 dynamic recall-hint context.
     scope.systemPrompt.section({ name: 'hmem:discipline', order: 5, text: MEMORY_DISCIPLINE })
+
+    // Warm-path auto sedimentation (FR-3.5/FR-6.5): after each turn closes,
+    // distill its memorable items through the LLM backend and route them into
+    // the store. Fire-and-forget — the hook never blocks the turn stop.
+    const sedimenter = new Sedimenter({
+      store: scope.memoryStore.store,
+      llm: createBackend(config, scope.get('llm', false) as unknown as LlmStreamLike | undefined),
+      config,
+      logger: { warn: (msg) => { scope.logger.warn(msg) } },
+    })
+    // This package does not depend on @deepseek-ai/dsh-agent, so the event is
+    // not in the local Events augmentation; the runtime payload carries
+    // { agent, turn, signal } (api-catalog) and older dispatches may omit agent.
+    const events = scope as unknown as {
+      on(event: 'agent/turn-stopping', listener: (payload: { agent?: AgentLike; turn?: number }) => void): void
+    }
+    events.on('agent/turn-stopping', (payload) => {
+      sedimenter.onTurnStopping(payload.agent ?? (payload as unknown as AgentLike), payload.turn ?? 0)
+    })
   })
 }
 
