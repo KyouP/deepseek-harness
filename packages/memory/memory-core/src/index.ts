@@ -16,21 +16,79 @@ import { registerStoreTools } from './tools-store.ts'
 import { registerRecallTools } from './tools-recall.ts'
 import { registerCommitmentTools } from './tools-commitments.ts'
 import { mountInjections } from './injections.ts'
+import type { LlmConfig } from './llm.ts'
 
 export const name = 'memory-core'
 export const inject = ['systemPrompt', 'tools']
 
-/** One-line prompt hint (order 30) telling the model the recall tool exists. */
-export const RECALL_HINT = '长期记忆：需要回忆用户的过往信息时，调用 memory_recall 检索，再用 memory_expand 查看全文。'
+/**
+ * Static discipline section (order 5): teaches the model how the memory
+ * system behaves. A constant string so the rendered bytes are stable across
+ * assemblies (NFR-3.1) — no dynamic data ever lands here.
+ */
+export const MEMORY_DISCIPLINE = [
+  '记忆系统：你的长期记忆由 memory 系列工具支撑，每轮对话结束后会自动沉淀要点，无需每轮手动保存。',
+  '用户明确要求「记住/别忘了」时，仍应调用 memory_store（type=memory）。亲口许下待办时用 type=commitment，完成后用 memory_close_commitment 闭环。',
+  '回忆往事优先 memory_recall（一两个特征关键词），命中后用 memory_expand 看全文；翻更早的会话原文用 memory_browse。',
+].join('\n')
 
-/** Memory-core configuration. All fields optional; defaults stay fully local. */
-export interface Config {
+/**
+ * Memory-core configuration. All fields optional; every field carries a
+ * schema default because the profile cordis.patch.yml replaces the WHOLE
+ * config by id. Defaults stay fully local.
+ *
+ * The llm* fields mirror {@link LlmConfig} (same names and types) so the
+ * resolved Config stays structurally assignable to it.
+ */
+export interface Config extends LlmConfig {
   /** Database file path; empty resolves to `$DSH_HOME/storages/hmem.db`. */
   dbPath?: string
   /** Seed text for the persona block (only when the block has never been written). */
   persona?: string
   /** Seed text for the human block (only when the block has never been written). */
   human?: string
+  /** Char budget for the persona core block section. */
+  personaBudgetChars?: number
+  /** Char budget for the human core block section. */
+  humanBudgetChars?: number
+  /** Row cap for the commitments injection (P0 channel — rows, not chars). */
+  commitmentRowCap?: number
+  /** Char budget for the scratchpad injection. */
+  scratchpadBudgetChars?: number
+  /** Char budget for the automatic recall injection (v2 recall channel). */
+  recallBudgetChars?: number
+  /** Char budget for the preheat (session-start) recall injection. */
+  preheatBudgetChars?: number
+  /** Enable automatic post-turn sedimentation of conversation points. */
+  sedimentEnabled?: boolean
+  /** Minimum turn size (chars) before sedimentation considers it. */
+  sedimentMinChars?: number
+  /** Maximum sedimentations per day. */
+  sedimentDailyMax?: number
+  /** Cooldown between sedimentation runs (minutes). */
+  sedimentCooldownMinutes?: number
+  /** Automatically inject recall hits into the prompt. */
+  recallAutoInject?: boolean
+  /** Minimum relevance score for an automatic recall hit. */
+  recallRelevanceFloor?: number
+  /** Enable periodic memory review. */
+  reviewEnabled?: boolean
+  /** Turns between review passes. */
+  reviewIntervalTurns?: number
+  /** Idle time (minutes) before consolidation runs. */
+  consolidateIdleMinutes?: number
+  /** Daily decay factor applied to card salience. */
+  decayLambdaPerDay?: number
+  /** Archive cards whose salience decays below this. */
+  decayArchiveBelow?: number
+  /** Enable the embedding backend for semantic recall. */
+  embedEnabled?: boolean
+  /** Embedding model name. */
+  embedModel?: string
+  /** Queue memory writes for confirmation instead of applying directly. */
+  confirmQueue?: boolean
+  /** Scope memories to the current workspace. */
+  workspaceScope?: boolean
 }
 
 /** Schemastery configuration for the memory-core consumer. */
@@ -38,6 +96,36 @@ export const Config: z<Config> = z.object({
   dbPath: z.string().default(''),
   persona: z.string().default(''),
   human: z.string().default(''),
+  personaBudgetChars: z.number().default(3000),
+  humanBudgetChars: z.number().default(2500),
+  commitmentRowCap: z.number().default(20),
+  scratchpadBudgetChars: z.number().default(1200),
+  recallBudgetChars: z.number().default(1800),
+  preheatBudgetChars: z.number().default(800),
+  llmBackend: z.union(['auto', 'ollama', 'openai', 'main', 'off'] as const).default('auto'),
+  ollamaHost: z.string().default('http://127.0.0.1:11434'),
+  ollamaModel: z.string().default('qwen3.5:4b'),
+  openaiBaseUrl: z.string().default(''),
+  openaiApiKey: z.string().default(''),
+  openaiModel: z.string().default(''),
+  mainProvider: z.string().default(''),
+  mainModel: z.string().default(''),
+  llmTimeoutMs: z.number().default(90_000),
+  sedimentEnabled: z.boolean().default(true),
+  sedimentMinChars: z.number().default(240),
+  sedimentDailyMax: z.number().default(8),
+  sedimentCooldownMinutes: z.number().default(30),
+  recallAutoInject: z.boolean().default(true),
+  recallRelevanceFloor: z.number().default(0.05),
+  reviewEnabled: z.boolean().default(true),
+  reviewIntervalTurns: z.number().default(5),
+  consolidateIdleMinutes: z.number().default(30),
+  decayLambdaPerDay: z.number().default(0.02),
+  decayArchiveBelow: z.number().default(0.2),
+  embedEnabled: z.boolean().default(false),
+  embedModel: z.string().default('bge-m3'),
+  confirmQueue: z.boolean().default(false),
+  workspaceScope: z.boolean().default(false),
 })
 
 /**
@@ -76,15 +164,24 @@ export function apply(ctx: Context, config: Config): void {
   // inject scope runs synchronously here (the dependency is already provided)
   // and unloads the sections/tool automatically if the store is ever disposed.
   ctx.inject(['memoryStore'], (scope) => {
-    mountCoreBlocks(scope, scope.memoryStore, { persona: config.persona, human: config.human })
+    mountCoreBlocks(
+      scope, scope.memoryStore,
+      { persona: config.persona, human: config.human },
+      { persona: config.personaBudgetChars ?? 3000, human: config.humanBudgetChars ?? 2500 },
+    )
     registerStoreTools(scope, scope.memoryStore)
     registerRecallTools(scope, scope.memoryStore)
     registerCommitmentTools(scope, scope.memoryStore)
-    mountInjections(scope, scope.memoryStore)
-    // Lightweight static hint; v2 replaces this with automatic recall injection.
-    scope.systemPrompt.context({ name: 'hmem:recall-hint', order: 30, text: () => RECALL_HINT })
+    mountInjections(scope, scope.memoryStore, {
+      commitmentRowCap: config.commitmentRowCap ?? 20,
+      scratchpadBudgetChars: config.scratchpadBudgetChars ?? 1200,
+    })
+    // Static discipline section (constant text, byte-stable); it replaces the
+    // v1 dynamic recall-hint context.
+    scope.systemPrompt.section({ name: 'hmem:discipline', order: 5, text: MEMORY_DISCIPLINE })
   })
 }
 
 export { MemoryStoreService } from './service.ts'
 export { CoreBlockCache, HUMAN_BLOCK_ORDER, PERSONA_BLOCK_ORDER } from './core-blocks.ts'
+export { TRUNCATION_MARKER, budgetText, truncateChars } from './budget.ts'

@@ -8,6 +8,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { CoreBlock } from '@deepseek-ai/dsh-memory-store'
 import type { MemoryStoreService } from './service.ts'
+import { truncateChars } from './budget.ts'
+import { sanitizeForInjection } from './sanitize.ts'
 
 /** Prompt order after the deployment persona (0) — M1 blocks sit right behind it. */
 export const PERSONA_BLOCK_ORDER = 10
@@ -38,16 +40,19 @@ export class CoreBlockCache {
 
 /**
  * Seed unwritten blocks from config, mount the two M1 prompt sections and the
- * `memory_update_core` self-edit tool.
+ * `memory_update_core` self-edit tool. Section text is sanitized and truncated
+ * to the configured per-block budget at every assembly.
  * @param ctx - plugin context with systemPrompt and tools composed.
  * @param service - the memory store service.
  * @param seeds - config seed texts.
+ * @param budgets - per-block char budgets (marker not counted).
  * @returns the live cache, shared with context providers of later tasks.
  */
 export function mountCoreBlocks(
   ctx: Context,
   service: MemoryStoreService,
   seeds: { persona?: string | undefined; human?: string | undefined },
+  budgets: { persona: number; human: number },
 ): CoreBlockCache {
   if (service.store.getCoreBlock('persona') === null && seeds.persona) {
     service.store.setCoreBlock('persona', seeds.persona)
@@ -59,12 +64,12 @@ export function mountCoreBlocks(
   ctx.systemPrompt.section({
     name: 'hmem:persona',
     order: PERSONA_BLOCK_ORDER,
-    text: () => cache.get('persona'),
+    text: () => truncateChars(sanitizeForInjection(cache.get('persona')), budgets.persona),
   })
   ctx.systemPrompt.section({
     name: 'hmem:human',
     order: HUMAN_BLOCK_ORDER,
-    text: () => cache.get('human'),
+    text: () => truncateChars(sanitizeForInjection(cache.get('human')), budgets.human),
   })
   ctx.tools.register(defineTool({
     name: 'memory_update_core',

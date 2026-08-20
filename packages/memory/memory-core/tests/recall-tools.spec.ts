@@ -4,10 +4,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import SystemPrompt, { renderContextSnapshot } from '@deepseek-ai/dsh-system-prompt'
+import SystemPrompt, { renderContextSnapshot, renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { CallId } from '@deepseek-ai/dsh-llm'
 import * as memory from '../src/index.ts'
+import { MEMORY_DISCIPLINE } from '../src/index.ts'
 
 const sig = new AbortController().signal
 let dir = ''
@@ -126,10 +127,15 @@ describe('recall tools', () => {
     await fiber.dispose()
   })
 
-  it('injects a one-line recall hint into the assembled context', async () => {
+  it('injects the static discipline section into the assembled prompt', async () => {
     const { ctx, fiber } = await setup()
+    // The discipline section is a static SECTION (not a context), so it shows
+    // up in the rendered prompt sections, not in the context snapshot.
+    const prompt = renderPrompt(await ctx.systemPrompt.assemble())
+    expect(prompt).toContain('memory_recall')
+    expect(prompt).toContain(MEMORY_DISCIPLINE)
     const snapshot = renderContextSnapshot(await ctx.systemPrompt.assemble())
-    expect(snapshot).toContain('memory_recall')
+    expect(snapshot).not.toContain('长期记忆：需要回忆')
     await fiber.dispose()
   })
 })
