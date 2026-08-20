@@ -298,20 +298,23 @@ export class MemoryStore {
 
   /**
    * Settle exponential decay up to `referenceIso`. Incremental: Δt runs from
-   * the `decay:last` meta watermark (first run falls back to each card's
-   * recorded_at), so a second settle at the same instant is a no-op. Pinned
-   * and already-archived cards are spared; decay is computed per-row in JS
-   * because node:sqlite does not guarantee math functions like exp().
+   * the later of the `decay:last` meta watermark and each card's recorded_at
+   * (first run has no watermark and starts at recorded_at), so a second settle
+   * at the same instant is a no-op and cards born after the watermark are not
+   * over-decayed. Pinned and already-archived cards are spared; decay is
+   * computed per-row in JS because node:sqlite does not guarantee math
+   * functions like exp().
    */
   settleDecay(referenceIso: string, lambdaPerDay: number, archiveBelow: number): { decayed: number; archived: number } {
     const last = this.getMeta('decay:last') // 首次退化为逐卡 recorded_at
     const ref = new Date(referenceIso).getTime()
+    const watermark = last ? new Date(last).getTime() : 0
     const rows = this.db.prepare(
       'SELECT id, strength, recorded_at FROM cards WHERE pinned = 0 AND archived = 0',
     ).all() as { id: string; strength: number; recorded_at: string }[]
     let decayed = 0, archived = 0
     for (const r of rows) {
-      const from = last ? new Date(last).getTime() : new Date(r.recorded_at).getTime()
+      const from = Math.max(watermark, new Date(r.recorded_at).getTime())
       const days = Math.max(0, (ref - from) / 864e5)
       if (days === 0) continue
       const next = r.strength * Math.exp(-lambdaPerDay * days)

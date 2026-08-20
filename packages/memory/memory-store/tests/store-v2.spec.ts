@@ -72,6 +72,18 @@ describe('decay', () => {
     expect(r.decayed).toBe(0)
     expect(store.getCard(c.id)?.strength).toBe(0.5)
   })
+
+  it('decays from max(watermark, recorded_at): cards born after the watermark are not over-decayed', () => {
+    // 水位在 T，卡 recorded_at 在 T+5d，结算点 T+10d → 只应衰减 5 天。
+    const t = Date.now() - 20 * 864e5
+    const c = store.insertCard({ summary: 'x', content: 'x', strength: 1 })
+    store.db.prepare('UPDATE cards SET recorded_at = ? WHERE id = ?')
+      .run(new Date(t + 5 * 864e5).toISOString(), c.id)
+    store.setMeta('decay:last', new Date(t).toISOString())
+    const r = store.settleDecay(new Date(t + 10 * 864e5).toISOString(), 0.02, 0.2)
+    expect(r.decayed).toBe(1)
+    expect(store.getCard(c.id)?.strength).toBeCloseTo(Math.exp(-0.02 * 5), 5)
+  })
 })
 
 describe('touchCards / reviveCard / recentCards', () => {
