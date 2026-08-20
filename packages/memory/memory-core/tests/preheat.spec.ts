@@ -82,6 +82,30 @@ describe('Preheat', () => {
   })
 })
 
+describe('anniversaryCards local date', () => {
+  // recorded_at is stored as a UTC ISO string and strftime matches its stored
+  // calendar date verbatim — so the METHOD contract is "returns cards whose
+  // stored MM-DD equals the given date, from earlier years", and it is the
+  // caller's job (preheat.localToday) to pass the LOCAL today as YYYY-MM-DD.
+  // For a UTC+8 user at local 02:00 on the 21st, UTC is still the 20th;
+  // passing the UTC date would surface the wrong anniversaries.
+  it('matches cards by the given date string, earlier years only', () => {
+    const store = setup()
+    const card = store.insertCard({ summary: '凌晨记下的约定', content: 'x' })
+    store.db.prepare('UPDATE cards SET recorded_at = ? WHERE id = ?')
+      .run('2025-08-20T18:00:00.000Z', card.id)
+
+    expect(store.anniversaryCards('2026-08-20').map(c => c.id)).toContain(card.id)
+    expect(store.anniversaryCards('2026-08-21').map(c => c.id)).not.toContain(card.id)
+    expect(store.anniversaryCards('2026-08-19').map(c => c.id)).not.toContain(card.id)
+    // Same-year recordings are never anniversaries, even on the matching day.
+    const fresh = store.insertCard({ summary: '今年今天的卡', content: 'y' })
+    store.db.prepare('UPDATE cards SET recorded_at = ? WHERE id = ?')
+      .run('2026-08-20T01:00:00.000Z', fresh.id)
+    expect(store.anniversaryCards('2026-08-20').map(c => c.id)).not.toContain(fresh.id)
+  })
+})
+
 describe('mountPreheat', () => {
   it('marks sessions on agent/session-start and renders once through the provider', () => {
     const store = setup()

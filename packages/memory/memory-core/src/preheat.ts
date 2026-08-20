@@ -41,6 +41,17 @@ export interface PreheatLogger {
 const NOOP_LOGGER: PreheatLogger = { warn: () => {} }
 
 /**
+ * Today's calendar date in LOCAL time as `YYYY-MM-DD`. Anniversaries are a
+ * local-day concept: for a UTC+8 user between 00:00 and 08:00, `toISOString`
+ * still says "yesterday", so the UTC string would surface the wrong MM-DD.
+ */
+function localToday(now: Date): string {
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${now.getFullYear()}-${month}-${day}`
+}
+
+/**
  * One-shot session warmup block. Marking is idempotent per session id;
  * rendering consumes exactly one mark.
  */
@@ -91,10 +102,12 @@ export class Preheat {
 
   /**
    * Assemble the three optional sections; '' when all are empty. Anniversary
-   * year math reads the ISO year prefixes (zero-padded strings) directly.
+   * matching uses the LOCAL calendar date (see {@link localToday}); the year
+   * math reads the zero-padded ISO year prefixes directly.
    */
   private buildBlock(): string {
     const now = new Date().toISOString()
+    const todayLocal = localToday(new Date())
     const sections: string[] = []
 
     const overdue = this.store.dueCommitments(now)
@@ -112,9 +125,9 @@ export class Preheat {
       sections.push(`最近的话题：\n${topics.map(c => `- ${c.summary}`).join('\n')}`)
     }
 
-    const anniversaries = this.store.anniversaryCards(now, ANNIVERSARY_LIMIT)
+    const anniversaries = this.store.anniversaryCards(todayLocal, ANNIVERSARY_LIMIT)
     if (anniversaries.length > 0) {
-      const currentYear = Number(now.slice(0, 4))
+      const currentYear = Number(todayLocal.slice(0, 4))
       const lines = anniversaries.map((c) => {
         const years = Math.max(1, currentYear - Number(c.recordedAt.slice(0, 4)))
         return `- ${years} 年前的今天：${c.summary}`
