@@ -342,6 +342,16 @@ export class MemoryStore {
   }
 
   /**
+   * Pin or unpin one card. `pinned` is NOT in the CARD_DERIVED_COLUMNS
+   * whitelist on purpose — pinning is a deliberate action (memory_pin tool)
+   * and goes through this dedicated method instead of widening the whitelist,
+   * the same rationale as setEmbedding.
+   */
+  setCardPinned(id: string, pinned: boolean): void {
+    this.db.prepare('UPDATE cards SET pinned = ? WHERE id = ?').run(pinned ? 1 : 0, id)
+  }
+
+  /**
    * Store one card's embedding as a raw float32 blob. `embedding` is NOT in
    * the CARD_DERIVED_COLUMNS whitelist on purpose — derived embeddings go
    * through this dedicated method instead of widening the whitelist.
@@ -440,10 +450,16 @@ export class MemoryStore {
     return toCommitment(this.db.prepare('SELECT * FROM commitments WHERE id = ?').get(id) as unknown as CommitmentRow)
   }
 
-  /** Close one commitment with a terminal status. */
+  /**
+   * Close one commitment with a terminal status. Only an active row may close:
+   * the WHERE clause excludes anything already closed, so zero changes means
+   * the id is unknown or already terminal and the call throws.
+   */
   closeCommitment(id: string, status: 'done' | 'cancelled'): void {
-    this.db.prepare('UPDATE commitments SET status = ?, closed_at = ? WHERE id = ?')
-      .run(status, new Date().toISOString(), id)
+    const changes = this.db.prepare(
+      "UPDATE commitments SET status = ?, closed_at = ? WHERE id = ? AND status = 'active'",
+    ).run(status, new Date().toISOString(), id).changes
+    if (changes === 0) throw new Error(`no active commitment with id ${id}`)
   }
 
   /** Every commitment still open. */

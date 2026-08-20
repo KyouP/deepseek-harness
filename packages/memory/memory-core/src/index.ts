@@ -14,6 +14,7 @@ import { MemoryStoreService } from './service.ts'
 import { mountCoreBlocks } from './core-blocks.ts'
 import { registerStoreTools } from './tools-store.ts'
 import { registerRecallTools } from './tools-recall.ts'
+import { registerCommitmentTools } from './tools-commitments.ts'
 import { mountInjections } from './injections.ts'
 
 export const name = 'memory-core'
@@ -78,6 +79,7 @@ export function apply(ctx: Context, config: Config): void {
     mountCoreBlocks(scope, scope.memoryStore, { persona: config.persona, human: config.human })
     registerStoreTools(scope, scope.memoryStore)
     registerRecallTools(scope, scope.memoryStore)
+    registerCommitmentTools(scope, scope.memoryStore)
     mountInjections(scope, scope.memoryStore)
     // Lightweight static hint; v2 replaces this with automatic recall injection.
     scope.systemPrompt.context({ name: 'hmem:recall-hint', order: 30, text: () => RECALL_HINT })
