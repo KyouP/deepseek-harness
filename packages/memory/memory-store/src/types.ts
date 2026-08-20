@@ -11,6 +11,7 @@ export interface Card {
   pinned: boolean
   archived: boolean
   sessionId: string | null
+  workspace: string | null
   validFrom: string | null
   validTo: string | null
   recordedAt: string
@@ -27,6 +28,7 @@ export interface NewCard {
   strength?: number
   pinned?: boolean
   sessionId?: string | null
+  workspace?: string | null
   validFrom?: string | null
   validTo?: string | null
 }
@@ -88,6 +90,40 @@ export interface CoreBlock {
   name: 'persona' | 'human'
   text: string
   revision: number
+}
+
+/** One scratchpad note. */
+export interface Note {
+  id: string
+  text: string
+  createdAt: string
+}
+
+/** One queued suggestion awaiting review (from the suggestions table). */
+export interface Suggestion {
+  id: string
+  kind: 'card' | 'fact' | 'user' | 'commitment'
+  content: string
+  hits: number
+  status: 'pending' | 'approved' | 'rejected'
+  firstSeen: string
+  lastSeen: string
+}
+
+/** Input for {@link MemoryStore.addSuggestion}. */
+export interface NewSuggestion {
+  kind: Suggestion['kind']
+  content: string
+}
+
+/** Full snapshot of every store table, for export/backup. */
+export interface MemoryDump {
+  cards: Card[]
+  facts: Fact[]
+  commitments: Commitment[]
+  coreBlocks: CoreBlock[]
+  notes: Note[]
+  links: { src: string; dst: string; weight: number }[]
 }
 
 /** One FTS search hit. */

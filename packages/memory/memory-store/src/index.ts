@@ -11,9 +11,10 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { SCHEMA_SQL } from './schema.ts'
+import { migrate } from './migrations.ts'
 import type {
   Card, Commitment, CoreBlock, DerivedCardPatch, Fact, ForgetReport,
-  NewCard, NewCommitment, NewFact, SearchHit,
+  NewCard, NewCommitment, NewFact, Note, SearchHit,
 } from './types.ts'
 
 export type * from './types.ts'
@@ -33,6 +34,7 @@ interface CardRow {
   pinned: number
   archived: number
   session_id: string | null
+  workspace: string | null
   valid_from: string | null
   valid_to: string | null
   recorded_at: string
@@ -44,8 +46,8 @@ function toCard(row: CardRow): Card {
     contextDesc: row.context_desc, keywords: JSON.parse(row.keywords) as string[],
     emotion: row.emotion, salience: row.salience, strength: row.strength,
     pinned: row.pinned === 1, archived: row.archived === 1,
-    sessionId: row.session_id, validFrom: row.valid_from,
-    validTo: row.valid_to, recordedAt: row.recorded_at,
+    sessionId: row.session_id, workspace: row.workspace ?? null,
+    validFrom: row.valid_from, validTo: row.valid_to, recordedAt: row.recorded_at,
   }
 }
 
@@ -96,13 +98,6 @@ interface CoreBlockRow {
   revision: number
 }
 
-/** One scratchpad note. */
-export interface Note {
-  id: string
-  text: string
-  createdAt: string
-}
-
 interface NoteRow {
   id: string
   text: string
@@ -132,14 +127,14 @@ export class MemoryStore {
     const recordedAt = new Date().toISOString()
     this.db.prepare(`
       INSERT INTO cards (id, summary, content, context_desc, keywords, emotion,
-        salience, strength, pinned, session_id, valid_from, valid_to, recorded_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        salience, strength, pinned, session_id, workspace, valid_from, valid_to, recorded_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id, input.summary, input.content, input.contextDesc ?? null,
       JSON.stringify(input.keywords ?? []), input.emotion ?? null,
       input.salience ?? 0, input.strength ?? 1, input.pinned ? 1 : 0,
-      input.sessionId ?? null, input.validFrom ?? null, input.validTo ?? null,
-      recordedAt,
+      input.sessionId ?? null, input.workspace ?? null, input.validFrom ?? null,
+      input.validTo ?? null, recordedAt,
     )
     return this.getCard(id) as Card
   }
@@ -201,6 +196,60 @@ export class MemoryStore {
       rows.push({ id: row.id, summary: row.summary, rank: Number.POSITIVE_INFINITY })
     }
     return rows
+  }
+
+  /**
+   * Substring search over live cards via the trigram FTS mirror. Unlike
+   * searchCardsFts (unicode61 word matching + prefix), trigram matches any
+   * infix of ≥3 characters, so mid-sentence CJK terms hit directly. Shorter
+   * terms (common for two-character CJK words) cannot be trigram-indexed, so
+   * they fall back to a LIKE substring scan, merged after FTS hits.
+   */
+  searchCardsTri(query: string, limit = 50): SearchHit[] {
+    const terms = query.split(/\s+/).filter(Boolean)
+    const indexed = terms.filter(t => [...t].length >= 3)
+    const short = terms.filter(t => [...t].length < 3)
+    const rows: SearchHit[] = []
+    if (indexed.length > 0) {
+      const match = indexed.map(t => `"${t.replace(/"/g, '')}"`).join(' OR ')
+      rows.push(...(this.db.prepare(`
+        SELECT c.id AS id, c.summary AS summary, bm25(cards_fts_tri) AS rank
+        FROM cards_fts_tri JOIN cards c ON c.rowid = cards_fts_tri.rowid
+        WHERE cards_fts_tri MATCH ? AND c.archived = 0
+        ORDER BY rank LIMIT ?
+      `).all(match, limit) as unknown as SearchHit[]))
+    }
+    if (short.length > 0 && rows.length < limit) {
+      const seen = new Set(rows.map(r => r.id))
+      const like = short
+        .map(() => '(c.summary LIKE ? OR c.content LIKE ? OR c.keywords LIKE ?)').join(' OR ')
+      const params = short.flatMap((t) => {
+        const safe = `%${t.replace(/[%_]/g, '')}%`
+        return [safe, safe, safe]
+      })
+      const extra = this.db.prepare(`
+        SELECT c.id AS id, c.summary AS summary FROM cards c
+        WHERE c.archived = 0 AND (${like}) LIMIT ?
+      `).all(...params, limit) as { id: string; summary: string }[]
+      for (const row of extra.filter(r => !seen.has(r.id)).slice(0, limit - rows.length)) {
+        rows.push({ id: row.id, summary: row.summary, rank: Number.POSITIVE_INFINITY })
+      }
+    }
+    return rows
+  }
+
+  /** Read one meta key, or null when unset. */
+  getMeta(key: string): string | null {
+    const row = this.db.prepare('SELECT value FROM meta WHERE key = ?').get(key) as { value: string } | undefined
+    return row?.value ?? null
+  }
+
+  /** Upsert one meta key. */
+  setMeta(key: string, value: string): void {
+    this.db.prepare(`
+      INSERT INTO meta (key, value) VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(key, value)
   }
 
   /** Insert one immutable fact triple. */
@@ -338,5 +387,6 @@ export function openMemoryStore(path: string): MemoryStore {
   mkdirSync(dirname(path), { recursive: true })
   const db = new DatabaseSync(path)
   db.exec(SCHEMA_SQL)
+  migrate(db)
   return new MemoryStore(db)
 }
