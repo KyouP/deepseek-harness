@@ -70,8 +70,11 @@ interface Candidate {
  *
  * Fallback semantics: candidates whose ONLY evidence is the LIKE substring
  * fallback (rank +Infinity from both channels, no link boost) carry no ranking
- * signal at all and score exactly 0, so the relevance floor funnels them into
- * the lone-survivor rule instead of presenting weak substring noise as fact.
+ * signal at all and score exactly 0, so the relevance floor keeps them below
+ * any real hit. When the WHOLE batch is below the floor (a weak-evidence-only
+ * query, e.g. a mid-sentence CJK term), every hit is returned — up to `limit`,
+ * each marked `uncertain: true` (FR-3.4 低置信标注) — instead of answering
+ * nothing or collapsing v1.1's CJK multi-hit fallback to a single row.
  *
  * Side effects (documented, intentional): the final card hits are passed to
  * `touchCards(ids, 0.1)` — the reinforcement half of access-based strengthening
@@ -162,11 +165,14 @@ export function rankedRecall(store: MemoryStore, query: string, opts: RankedReca
 
   scored.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
 
-  // Relevance floor: drop everything below it; when the whole batch is below,
-  // keep the single best hit and mark it uncertain rather than answer nothing.
+  // Relevance floor: below-floor hits are dropped whenever at least one hit
+  // clears the floor. When the whole batch is below it (weak-evidence-only
+  // query), return ALL of them — up to limit — each marked uncertain, rather
+  // than answering nothing or collapsing to a single row (v1.1 CJK fallback
+  // must keep its multi-hit behavior; the uncertainty is surfaced via FR-3.4).
   let final = scored.filter(h => h.score >= floor)
   if (final.length === 0 && scored.length > 0) {
-    final = [{ ...scored[0]!, uncertain: true }]
+    final = scored.map(h => ({ ...h, uncertain: true }))
   }
   final = final.slice(0, limit)
 

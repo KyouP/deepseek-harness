@@ -28,16 +28,30 @@ describe('rankedRecall', () => {
     expect(hits[0]!.score).toBeGreaterThan(hits[1]!.score)
   })
 
-  it('relevance floor drops junk and marks lone survivor uncertain', () => {
+  it('relevance floor keeps weak-only batches whole, every hit marked uncertain', () => {
     // 幻星 is two characters sitting mid-run in every card: FTS prefix and the
     // trigram index both miss it, so only the LIKE substring fallback hits —
-    // the weakest channel, scoring below the default floor.
+    // the weakest channel, scoring below the default floor. A weak-evidence-only
+    // batch returns ALL hits (v1.1 CJK multi-hit must not regress), each
+    // marked uncertain (FR-3.4).
     store.insertCard({ summary: '游戏', content: '主人喜欢玩幻星大陆游戏' })
     store.insertCard({ summary: '天气', content: '据说幻星大陆的天气不错' })
     store.insertCard({ summary: '邮票', content: '他收集了幻星主题邮票' })
     const hits = rankedRecall(store, '幻星')
-    expect(hits.length).toBeLessThanOrEqual(1)
-    expect(hits[0]!.uncertain).toBe(true)
+    expect(hits).toHaveLength(3)
+    expect(hits.every(h => h.uncertain)).toBe(true)
+  })
+
+  it('mixed batches drop the below-floor weak hits', () => {
+    // 苹果 prefixes the FTS-matched card's CJK run; the other two only
+    // substring-match mid-run, so they fall below the floor and are dropped
+    // as long as the genuine hit clears it.
+    const strong = store.insertCard({ summary: '苹果种植技术指南', content: '苹果种植技术指南 全文' })
+    store.insertCard({ summary: '运输', content: '据说苹果运输要注意保鲜' })
+    store.insertCard({ summary: '价格', content: '今年的苹果价格很稳定' })
+    const hits = rankedRecall(store, '苹果')
+    expect(hits.map(h => h.id)).toEqual([strong.id])
+    expect(hits[0]!.uncertain).toBe(false)
   })
 
   it('one-hop neighbors of top hits get link boost', () => {
