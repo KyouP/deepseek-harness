@@ -22,6 +22,8 @@ import { createBackend } from './llm.ts'
 import { Sedimenter, type AgentLike } from './sediment.ts'
 import { mountAutoRecall } from './auto-recall.ts'
 import { mountPreheat } from './preheat.ts'
+import { TurnReview, isSubagentAgent } from './review.ts'
+import { registerReviewTools } from './tools-review.ts'
 
 export const name = 'memory-core'
 export const inject = ['systemPrompt', 'tools']
@@ -208,6 +210,14 @@ export function apply(ctx: Context, config: Config): void {
       config,
       logger: { warn: (msg) => { scope.logger.warn(msg) } },
     })
+    // Periodic sticky review (FR-8.0): after reviewIntervalTurns top-level
+    // turns, the hmem:review provider (order 25 — late, right before the
+    // volatile tail) injects a silent review instruction until the model
+    // calls memory_review_done.
+    const review = new TurnReview(scope.memoryStore.store, config)
+    scope.systemPrompt.context({ name: 'hmem:review', order: 25, text: () => review.renderDue() })
+    registerReviewTools(scope, scope.memoryStore, review)
+
     // This package does not depend on @deepseek-ai/dsh-agent, so the event is
     // not in the local Events augmentation; the runtime payload carries
     // { agent, turn, signal } (api-catalog) and older dispatches may omit agent.
@@ -216,6 +226,14 @@ export function apply(ctx: Context, config: Config): void {
     }
     events.on('agent/turn-stopping', (payload) => {
       sedimenter.onTurnStopping(payload.agent ?? (payload as unknown as AgentLike), payload.turn ?? 0)
+      // Periodic review (FR-8.0): count top-level turns only — same subagent
+      // gate the sediment task uses. Synchronous meta read/write, fire-and-
+      // forget, never blocks the turn stop.
+      const reviewAgent = payload.agent ?? (payload as unknown as AgentLike)
+      if (!isSubagentAgent(reviewAgent)) {
+        const id = reviewAgent?.session?.id
+        review.onTurn(id !== undefined && id !== null ? String(id) : 'unknown')
+      }
     })
   })
 }
@@ -229,5 +247,8 @@ export { AutoRecall, mountAutoRecall, RECALL_BLOCK_HEADER } from './auto-recall.
 export type { AutoRecallConfig, AutoRecallLogger } from './auto-recall.ts'
 export { Preheat, mountPreheat } from './preheat.ts'
 export type { PreheatConfig, PreheatLogger } from './preheat.ts'
+export { TurnReview, isSubagentAgent, REVIEW_PROMPT } from './review.ts'
+export type { ReviewConfig } from './review.ts'
+export { registerReviewTools } from './tools-review.ts'
 export { browseSessions, DEFAULT_BROWSE_LIMIT, parseSessionJsonl } from './browse.ts'
 export type { BrowseSessionsOptions, BrowseSessionsResult, ParsedSession, SessionMessage } from './browse.ts'
