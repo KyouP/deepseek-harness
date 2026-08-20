@@ -346,6 +346,24 @@ export class MemoryStore {
   }
 
   /**
+   * "On this day" cards for the session preheat: live cards whose recorded
+   * month-day matches `todayIso`'s but that were recorded in an earlier year,
+   * newest first. SQLite's strftime parses the stored ISO-8601 strings
+   * directly, and the year comparison is a string compare of zero-padded
+   * 4-digit years.
+   */
+  anniversaryCards(todayIso: string, limit = 5): Card[] {
+    const rows = this.db.prepare(`
+      SELECT * FROM cards
+      WHERE archived = 0
+        AND strftime('%m-%d', recorded_at) = strftime('%m-%d', ?)
+        AND strftime('%Y', recorded_at) < strftime('%Y', ?)
+      ORDER BY recorded_at DESC, rowid DESC LIMIT ?
+    `).all(todayIso, todayIso, limit) as unknown as CardRow[]
+    return rows.map(toCard)
+  }
+
+  /**
    * Pin or unpin one card. `pinned` is NOT in the CARD_DERIVED_COLUMNS
    * whitelist on purpose — pinning is a deliberate action (memory_pin tool)
    * and goes through this dedicated method instead of widening the whitelist,

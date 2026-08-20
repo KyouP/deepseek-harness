@@ -21,6 +21,7 @@ import type { LlmConfig, LlmStreamLike } from './llm.ts'
 import { createBackend } from './llm.ts'
 import { Sedimenter, type AgentLike } from './sediment.ts'
 import { mountAutoRecall } from './auto-recall.ts'
+import { mountPreheat } from './preheat.ts'
 
 export const name = 'memory-core'
 export const inject = ['systemPrompt', 'tools']
@@ -192,6 +193,12 @@ export function apply(ctx: Context, config: Config): void {
     // turns both halves into no-ops.
     mountAutoRecall(scope, scope.memoryStore.store, config)
 
+    // Session preheat (FR-9.1): session-start marks the session, and the
+    // hmem:preheat provider (order 12) emits a one-time warmup block —
+    // due/overdue commitments, recent topics, anniversaries — on the first
+    // context render of that session.
+    mountPreheat(scope, scope.memoryStore.store, config)
+
     // Warm-path auto sedimentation (FR-3.5/FR-6.5): after each turn closes,
     // distill its memorable items through the LLM backend and route them into
     // the store. Fire-and-forget — the hook never blocks the turn stop.
@@ -220,5 +227,7 @@ export { rankedRecall } from './recall.ts'
 export type { RankedHit, RankedRecallOptions } from './recall.ts'
 export { AutoRecall, mountAutoRecall, RECALL_BLOCK_HEADER } from './auto-recall.ts'
 export type { AutoRecallConfig, AutoRecallLogger } from './auto-recall.ts'
+export { Preheat, mountPreheat } from './preheat.ts'
+export type { PreheatConfig, PreheatLogger } from './preheat.ts'
 export { browseSessions, DEFAULT_BROWSE_LIMIT, parseSessionJsonl } from './browse.ts'
 export type { BrowseSessionsOptions, BrowseSessionsResult, ParsedSession, SessionMessage } from './browse.ts'
