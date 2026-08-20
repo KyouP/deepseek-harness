@@ -14,7 +14,8 @@ import { SCHEMA_SQL } from './schema.ts'
 import { migrate } from './migrations.ts'
 import type {
   Card, Commitment, CoreBlock, DerivedCardPatch, Fact, ForgetReport,
-  NewCard, NewCommitment, NewFact, Note, SearchHit,
+  MemoryDump, NewCard, NewCommitment, NewFact, NewSuggestion, Note, SearchHit,
+  Suggestion,
 } from './types.ts'
 
 export type * from './types.ts'
@@ -102,6 +103,27 @@ interface NoteRow {
   id: string
   text: string
   created_at: string
+}
+
+function toNote(row: NoteRow): Note {
+  return { id: row.id, text: row.text, createdAt: row.created_at }
+}
+
+interface SuggestionRow {
+  id: string
+  kind: Suggestion['kind']
+  content: string
+  hits: number
+  status: Suggestion['status']
+  first_seen: string
+  last_seen: string
+}
+
+function toSuggestion(row: SuggestionRow): Suggestion {
+  return {
+    id: row.id, kind: row.kind, content: row.content, hits: row.hits,
+    status: row.status, firstSeen: row.first_seen, lastSeen: row.last_seen,
+  }
 }
 
 /** The H-MEM database handle. Methods are added by Tasks 2-4. */
@@ -252,6 +274,101 @@ export class MemoryStore {
     `).run(key, value)
   }
 
+  /** Link two cards; repeat links accumulate weight. */
+  addLink(src: string, dst: string, weight = 1): void {
+    this.db.prepare(`INSERT INTO links (src, dst, weight, created_at) VALUES (?, ?, ?, ?)
+      ON CONFLICT(src, dst) DO UPDATE SET weight = links.weight + excluded.weight`)
+      .run(src, dst, weight, new Date().toISOString())
+  }
+
+  /** Live neighbors of a card across directed links, heaviest first. */
+  linkedNeighbors(id: string, limit = 5): { id: string; summary: string; weight: number }[] {
+    return this.db.prepare(`
+      SELECT c.id AS id, c.summary AS summary, l.weight AS weight FROM links l
+      JOIN cards c ON c.id = CASE WHEN l.src = ? THEN l.dst ELSE l.src END
+      WHERE (l.src = ? OR l.dst = ?) AND c.archived = 0 ORDER BY l.weight DESC LIMIT ?
+    `).all(id, id, id, limit) as { id: string; summary: string; weight: number }[]
+  }
+
+  /** Reinforce cards on access: strength += boost, capped at 5. */
+  touchCards(ids: string[], boost = 0.1): void {
+    const stmt = this.db.prepare('UPDATE cards SET strength = MIN(5, strength + ?) WHERE id = ?')
+    for (const id of ids) stmt.run(boost, id)
+  }
+
+  /**
+   * Settle exponential decay up to `referenceIso`. Incremental: Δt runs from
+   * the `decay:last` meta watermark (first run falls back to each card's
+   * recorded_at), so a second settle at the same instant is a no-op. Pinned
+   * and already-archived cards are spared; decay is computed per-row in JS
+   * because node:sqlite does not guarantee math functions like exp().
+   */
+  settleDecay(referenceIso: string, lambdaPerDay: number, archiveBelow: number): { decayed: number; archived: number } {
+    const last = this.getMeta('decay:last') // 首次退化为逐卡 recorded_at
+    const ref = new Date(referenceIso).getTime()
+    const rows = this.db.prepare(
+      'SELECT id, strength, recorded_at FROM cards WHERE pinned = 0 AND archived = 0',
+    ).all() as { id: string; strength: number; recorded_at: string }[]
+    let decayed = 0, archived = 0
+    for (const r of rows) {
+      const from = last ? new Date(last).getTime() : new Date(r.recorded_at).getTime()
+      const days = Math.max(0, (ref - from) / 864e5)
+      if (days === 0) continue
+      const next = r.strength * Math.exp(-lambdaPerDay * days)
+      decayed++
+      if (next < archiveBelow) { this.updateCardDerived(r.id, { strength: next, archived: true }); archived++ }
+      else this.updateCardDerived(r.id, { strength: next })
+    }
+    this.setMeta('decay:last', referenceIso)
+    return { decayed, archived }
+  }
+
+  /** Un-archive a card, lifting its strength to at least 0.5. */
+  reviveCard(id: string): void {
+    const card = this.getCard(id)
+    if (!card) return
+    this.updateCardDerived(id, { archived: false, strength: Math.max(card.strength, 0.5) })
+  }
+
+  /** Live cards, newest first (rowid breaks recorded_at ties). */
+  recentCards(limit = 20): Card[] {
+    const rows = this.db.prepare(
+      'SELECT * FROM cards WHERE archived = 0 ORDER BY recorded_at DESC, rowid DESC LIMIT ?',
+    ).all(limit) as unknown as CardRow[]
+    return rows.map(toCard)
+  }
+
+  /**
+   * Store one card's embedding as a raw float32 blob. `embedding` is NOT in
+   * the CARD_DERIVED_COLUMNS whitelist on purpose — derived embeddings go
+   * through this dedicated method instead of widening the whitelist.
+   */
+  setEmbedding(id: string, vector: number[]): void {
+    this.db.prepare('UPDATE cards SET embedding = ? WHERE id = ?')
+      .run(Buffer.from(new Float32Array(vector).buffer), id)
+  }
+
+  /** Live cards that have an embedding, decoded back to float32 vectors. */
+  cardsWithEmbeddings(): { id: string; vector: number[] }[] {
+    const rows = this.db.prepare(
+      'SELECT id, embedding FROM cards WHERE embedding IS NOT NULL AND archived = 0',
+    ).all() as unknown as { id: string; embedding: Uint8Array }[]
+    return rows.map((r) => {
+      // Copy to a fresh buffer: a pooled Uint8Array may be 4-byte-misaligned.
+      const bytes = r.embedding.slice()
+      return { id: r.id, vector: Array.from(new Float32Array(bytes.buffer)) }
+    })
+  }
+
+  /** Live cards still missing an embedding, oldest first, as embeddable text. */
+  cardsWithoutEmbeddings(limit = 20): { id: string; text: string }[] {
+    return this.db.prepare(`
+      SELECT id, summary || char(10) || content AS text FROM cards
+      WHERE embedding IS NULL AND archived = 0
+      ORDER BY recorded_at ASC, rowid ASC LIMIT ?
+    `).all(limit) as { id: string; text: string }[]
+  }
+
   /** Insert one immutable fact triple. */
   insertFact(input: NewFact): Fact {
     const id = randomUUID()
@@ -288,6 +405,17 @@ export class MemoryStore {
       ? this.db.prepare('SELECT * FROM facts WHERE superseded_by IS NULL').all()
       : this.db.prepare('SELECT * FROM facts WHERE superseded_by IS NULL AND subject = ?').all(subject)
     return (rows as unknown as FactRow[]).map(toFact)
+  }
+
+  /** Substring search over active facts across subject/predicate/object. */
+  searchFacts(query: string, limit = 50): Fact[] {
+    const safe = `%${query.replace(/[%_]/g, '')}%`
+    const rows = this.db.prepare(`
+      SELECT * FROM facts WHERE superseded_by IS NULL
+        AND (subject LIKE ? OR predicate LIKE ? OR object LIKE ?)
+      ORDER BY recorded_at DESC, rowid DESC LIMIT ?
+    `).all(safe, safe, safe, limit) as unknown as FactRow[]
+    return rows.map(toFact)
   }
 
   /** Record one new active commitment. */
@@ -329,6 +457,21 @@ export class MemoryStore {
     return rows.map(toCommitment)
   }
 
+  /**
+   * Active commitments due after `nowIso` but within `withinHours`. Overdue
+   * items are excluded on purpose — they are dueCommitments' job, and callers
+   * union the two.
+   */
+  dueSoonCommitments(nowIso: string, withinHours: number): Commitment[] {
+    const until = new Date(new Date(nowIso).getTime() + withinHours * 3600e3).toISOString()
+    const rows = this.db.prepare(`
+      SELECT * FROM commitments
+      WHERE status = 'active' AND due_at IS NOT NULL AND due_at > ? AND due_at <= ?
+      ORDER BY due_at ASC
+    `).all(nowIso, until) as unknown as CommitmentRow[]
+    return rows.map(toCommitment)
+  }
+
   /** Read one M1 core block, or null when never written. */
   getCoreBlock(name: 'persona' | 'human'): CoreBlock | null {
     const row = this.db.prepare('SELECT * FROM core_blocks WHERE name = ?').get(name) as CoreBlockRow | undefined
@@ -356,7 +499,79 @@ export class MemoryStore {
       // rowid breaks created_at ties (millisecond resolution) deterministically.
       'SELECT id, text, created_at FROM scratchpad WHERE created_at >= ? ORDER BY created_at DESC, rowid DESC LIMIT ?',
     ).all(sinceIso, limit) as unknown as NoteRow[]
-    return rows.reverse().map(r => ({ id: r.id, text: r.text, createdAt: r.created_at }))
+    return rows.reverse().map(toNote)
+  }
+
+  /** Delete notes strictly older than `iso`; returns the deleted row count. */
+  deleteNotesBefore(iso: string): number {
+    return Number(this.db.prepare('DELETE FROM scratchpad WHERE created_at < ?').run(iso).changes)
+  }
+
+  /** Notes inside the [sinceIso, untilIso] window, oldest first, uncapped. */
+  notesBetween(sinceIso: string, untilIso: string): Note[] {
+    const rows = this.db.prepare(
+      'SELECT id, text, created_at FROM scratchpad WHERE created_at >= ? AND created_at <= ? ORDER BY created_at ASC, rowid ASC',
+    ).all(sinceIso, untilIso) as unknown as NoteRow[]
+    return rows.map(toNote)
+  }
+
+  /**
+   * Queue one suggestion for review. The merge key is kind + content: a repeat
+   * bumps hits and last_seen on the existing row and reports merged: true.
+   */
+  addSuggestion(input: NewSuggestion): { suggestion: Suggestion; merged: boolean } {
+    const now = new Date().toISOString()
+    const existing = this.db.prepare(
+      'SELECT * FROM suggestions WHERE kind = ? AND content = ?',
+    ).get(input.kind, input.content) as unknown as SuggestionRow | undefined
+    if (existing) {
+      this.db.prepare('UPDATE suggestions SET hits = hits + 1, last_seen = ? WHERE id = ?')
+        .run(now, existing.id)
+      const row = this.db.prepare('SELECT * FROM suggestions WHERE id = ?')
+        .get(existing.id) as unknown as SuggestionRow
+      return { suggestion: toSuggestion(row), merged: true }
+    }
+    const id = randomUUID()
+    this.db.prepare(`
+      INSERT INTO suggestions (id, kind, content, hits, status, first_seen, last_seen)
+      VALUES (?, ?, ?, 1, 'pending', ?, ?)
+    `).run(id, input.kind, input.content, now, now)
+    const row = this.db.prepare('SELECT * FROM suggestions WHERE id = ?')
+      .get(id) as unknown as SuggestionRow
+    return { suggestion: toSuggestion(row), merged: false }
+  }
+
+  /** Suggestions, most-hit first; omit `status` to list every status. */
+  listSuggestions(status?: Suggestion['status']): Suggestion[] {
+    const rows = status === undefined
+      ? this.db.prepare('SELECT * FROM suggestions ORDER BY hits DESC, last_seen DESC').all()
+      : this.db.prepare(
+        'SELECT * FROM suggestions WHERE status = ? ORDER BY hits DESC, last_seen DESC',
+      ).all(status)
+    return (rows as unknown as SuggestionRow[]).map(toSuggestion)
+  }
+
+  /** Mark one queued suggestion approved or rejected. */
+  resolveSuggestion(id: string, status: 'approved' | 'rejected'): void {
+    this.db.prepare('UPDATE suggestions SET status = ? WHERE id = ?').run(status, id)
+  }
+
+  /** Full snapshot of every store table, for export/backup. */
+  dump(): MemoryDump {
+    const cards = (this.db.prepare('SELECT * FROM cards ORDER BY rowid').all() as unknown as CardRow[])
+      .map(toCard)
+    const facts = (this.db.prepare('SELECT * FROM facts ORDER BY rowid').all() as unknown as FactRow[])
+      .map(toFact)
+    const commitments = (
+      this.db.prepare('SELECT * FROM commitments ORDER BY rowid').all() as unknown as CommitmentRow[]
+    ).map(toCommitment)
+    const coreBlocks = this.db.prepare('SELECT * FROM core_blocks ORDER BY name').all() as unknown as CoreBlock[]
+    const notes = (
+      this.db.prepare('SELECT id, text, created_at FROM scratchpad ORDER BY rowid').all() as unknown as NoteRow[]
+    ).map(toNote)
+    const links = this.db.prepare('SELECT src, dst, weight FROM links ORDER BY src, dst').all() as
+      { src: string; dst: string; weight: number }[]
+    return { cards, facts, commitments, coreBlocks, notes, links }
   }
 
   /**
