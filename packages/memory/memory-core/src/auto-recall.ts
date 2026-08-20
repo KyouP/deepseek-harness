@@ -14,6 +14,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { MemoryStore } from '@deepseek-ai/dsh-memory-store'
 import { truncateChars } from './budget.ts'
+import { sanitizeForInjection } from './sanitize.ts'
 import { rankedRecall, type RankedHit } from './recall.ts'
 
 /** Block header; names memory_expand so the model can pull the full text. */
@@ -66,7 +67,9 @@ function textOf(content: unknown): string {
 function renderRecallBlock(hits: RankedHit[], budgetChars: number): string {
   if (hits.length === 0) return ''
   const lines = hits.map(h => `- [${h.id}] ${h.summary}`)
-  return truncateChars(`${RECALL_BLOCK_HEADER}\n${lines.join('\n')}`, budgetChars)
+  // FR-3.7 hygiene gate, same order as the core blocks: scrub injection
+  // patterns first, then apply the char budget.
+  return truncateChars(sanitizeForInjection(`${RECALL_BLOCK_HEADER}\n${lines.join('\n')}`), budgetChars)
 }
 
 /**
