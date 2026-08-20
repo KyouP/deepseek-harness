@@ -15,6 +15,7 @@ import { mountCoreBlocks } from './core-blocks.ts'
 import { registerStoreTools } from './tools-store.ts'
 import { registerRecallTools } from './tools-recall.ts'
 import { registerCommitmentTools } from './tools-commitments.ts'
+import { registerBrowseTool } from './tools-browse.ts'
 import { mountInjections } from './injections.ts'
 import type { LlmConfig, LlmStreamLike } from './llm.ts'
 import { createBackend } from './llm.ts'
@@ -175,6 +176,7 @@ export function apply(ctx: Context, config: Config): void {
     registerStoreTools(scope, scope.memoryStore)
     registerRecallTools(scope, scope.memoryStore)
     registerCommitmentTools(scope, scope.memoryStore)
+    registerBrowseTool(scope, scope.memoryStore)
     mountInjections(scope, scope.memoryStore, {
       commitmentRowCap: config.commitmentRowCap ?? 20,
       scratchpadBudgetChars: config.scratchpadBudgetChars ?? 1200,
@@ -218,3 +220,5 @@ export { rankedRecall } from './recall.ts'
 export type { RankedHit, RankedRecallOptions } from './recall.ts'
 export { AutoRecall, mountAutoRecall, RECALL_BLOCK_HEADER } from './auto-recall.ts'
 export type { AutoRecallConfig, AutoRecallLogger } from './auto-recall.ts'
+export { browseSessions, DEFAULT_BROWSE_LIMIT, parseSessionJsonl } from './browse.ts'
+export type { BrowseSessionsOptions, BrowseSessionsResult, ParsedSession, SessionMessage } from './browse.ts'
