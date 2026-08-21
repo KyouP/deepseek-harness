@@ -26,6 +26,7 @@ import { mountPreheat } from './preheat.ts'
 import { TurnReview, isSubagentAgent } from './review.ts'
 import { registerReviewTools } from './tools-review.ts'
 import { registerSuggestionTools } from './tools-suggestions.ts'
+import { registerExportTools } from './tools-export.ts'
 
 export const name = 'memory-core'
 export const inject = ['systemPrompt', 'tools']
@@ -243,6 +244,9 @@ export function apply(ctx: Context, config: Config): void {
     // Suggestion-queue approval tools (FR-3.8): list/approve/reject the
     // suggestions queued by sediment + periodic review.
     registerSuggestionTools(scope, scope.memoryStore, embedder)
+    // Backup tools (FR-2.8): export the full store dump to JSON / import it
+    // back with per-table dedupe.
+    registerExportTools(scope, scope.memoryStore)
 
     // This package does not depend on @deepseek-ai/dsh-agent, so the event is
     // not in the local Events augmentation; the runtime payload carries
@@ -282,6 +286,7 @@ export { Consolidator } from './consolidate.ts'
 export type { ConsolidateConfig, ConsolidateDeps, ConsolidateLogger, ConsolidateReport, SedimentRetrier } from './consolidate.ts'
 export { registerReviewTools } from './tools-review.ts'
 export { registerSuggestionTools } from './tools-suggestions.ts'
+export { registerExportTools } from './tools-export.ts'
 export { browseSessions, DEFAULT_BROWSE_LIMIT, parseSessionJsonl } from './browse.ts'
 export type { BrowseSessionsOptions, BrowseSessionsResult, ParsedSession, SessionMessage } from './browse.ts'
 export { autoLink, CJK_STOP_CHARS, extractKeywords, LATIN_STOP_WORDS } from './links.ts'
