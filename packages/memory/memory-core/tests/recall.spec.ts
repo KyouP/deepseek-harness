@@ -125,6 +125,15 @@ describe('rankedRecall', () => {
     expect(store.getCard(card.id)!.strength).toBeGreaterThan(before)
   })
 
+  it('pinned cards are reinforced too, but the +0.1 stays capped at 5', () => {
+    // The strength cap lives store-side (touchCards: MIN(5, strength + boost))
+    // and applies to pinned cards as well — pinning exempts decay, not the cap.
+    const pinned = store.insertCard({ summary: '钉住的高强卡', content: '钉住的高强卡 全文', strength: 4.98, pinned: true })
+    const hits = rankedRecall(store, '钉住的高强卡')
+    expect(hits.map(h => h.id)).toEqual([pinned.id])
+    expect(store.getCard(pinned.id)!.strength).toBe(5)
+  })
+
   it('link-boosts a neighbor that is already a search hit', () => {
     const a = store.insertCard({ summary: '苹果种植技术指南', content: '苹果种植技术指南 全文' })
     const b = store.insertCard({ summary: '苹果运输保鲜方案', content: '苹果运输保鲜方案 全文' })

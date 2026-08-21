@@ -69,6 +69,12 @@ function dayAgoIso(): string {
   return new Date(Date.now() - DAY_MS).toISOString()
 }
 
+/** Cards are stamped with `new Date()` on insert; backdate via the test-only db handle. */
+function backdateCard(id: string, ageMs: number): void {
+  store!.db.prepare('UPDATE cards SET recorded_at = ? WHERE id = ?')
+    .run(new Date(Date.now() - ageMs).toISOString(), id)
+}
+
 describe('Consolidator', () => {
   it('distills old notes into cards then deletes them', async () => {
     const llm = fakeLlm(['[CARD] 主人怕吵'])
@@ -143,11 +149,69 @@ describe('Consolidator', () => {
 
     const report = await consolidator.run()
 
-    expect(report).toEqual({ distilled: 0, superseded: 0, recompiled: false })
+    expect(report).toEqual({ distilled: 0, superseded: 0, recompiled: false, decayed: 0, archived: 0 })
     // 便签保留、建议保留（下轮再试）
     expect(store!.notesBetween(weekAgoIso(), dayAgoIso())).toHaveLength(1)
     expect(store!.listSuggestions('approved')).toHaveLength(1)
     expect(store!.getCoreBlock('human')).toBeNull()
+  })
+
+  it('settles decay at the end of the pipeline with config values, sparing pinned cards', async () => {
+    const config: ConsolidateConfig = { ...CONFIG, decayLambdaPerDay: 0.02, decayArchiveBelow: 0.2 }
+    const consolidator = setup(NULL_LLM, config)
+    const settleSpy = vi.spyOn(store!, 'settleDecay')
+    // 200 天未访问：strength 1 × e^(-0.02×200) ≈ 0.018 < 0.2 → 归档
+    const stale = store!.insertCard({ summary: '陈旧记忆', content: '陈旧记忆 全文', strength: 1 })
+    backdateCard(stale.id, 200 * DAY_MS)
+    // 同样陈旧的 pinned 卡：免疫衰减
+    const pinned = store!.insertCard({ summary: '钉住的陈旧记忆', content: '钉住的陈旧记忆 全文', strength: 1, pinned: true })
+    backdateCard(pinned.id, 200 * DAY_MS)
+
+    const before = Date.now()
+    const report = await consolidator.run()
+
+    expect(settleSpy).toHaveBeenCalledTimes(1)
+    const [refIso, lambda, below] = settleSpy.mock.calls[0]!
+    expect(lambda).toBe(0.02)
+    expect(below).toBe(0.2)
+    expect(Math.abs(Date.parse(refIso) - before)).toBeLessThan(5000)
+    expect(report.decayed).toBe(1)
+    expect(report.archived).toBe(1)
+    const staleAfter = store!.getCard(stale.id)!
+    expect(staleAfter.archived).toBe(true)
+    expect(staleAfter.strength).toBeLessThan(0.2)
+    const pinnedAfter = store!.getCard(pinned.id)!
+    expect(pinnedAfter.archived).toBe(false)
+    expect(pinnedAfter.strength).toBe(1)
+    // 水位已落：同刻再跑是 no-op
+    const second = await consolidator.run()
+    expect(second.decayed).toBe(0)
+    expect(second.archived).toBe(0)
+  })
+
+  it('survives a settleDecay failure without breaking the rest of the pipeline', async () => {
+    const llm = fakeLlm(['[CARD] 主人怕吵'])
+    const consolidator = setup(llm)
+    addNoteBackdated('便签：楼下装修很吵', 2 * DAY_MS)
+    vi.spyOn(store!, 'settleDecay').mockImplementation(() => {
+      throw new Error('disk on fire')
+    })
+
+    const report = await consolidator.run()
+
+    expect(report.distilled).toBe(1)
+    expect(report.decayed).toBe(0)
+    expect(report.archived).toBe(0)
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('settle decay'))
+  })
+
+  it('falls back to schema defaults when decay config is absent', async () => {
+    const consolidator = setup(NULL_LLM)
+    const settleSpy = vi.spyOn(store!, 'settleDecay')
+
+    await consolidator.run()
+
+    expect(settleSpy).toHaveBeenCalledWith(expect.any(String), 0.02, 0.2)
   })
 
   it('tick respects idle watermark and is reentry-safe', async () => {

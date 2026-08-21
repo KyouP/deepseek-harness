@@ -13,6 +13,10 @@
 //   ④ human block 重编译——存在 approved 的 kind=user 建议 → LLM 合并进当前
 //      human block → sanitizeForWrite 过闸 → setCoreBlock('human', …) →
 //      建议置 rejected（已消费）；LLM 不可用则跳过不丢。
+//   ⑤ 衰减结算——store.settleDecay(now, decayLambdaPerDay, decayArchiveBelow)：
+//      按 max(decay:last 水位, 卡 recorded_at) 起算的 Δt 指数衰减非 pinned 卡，
+//      低于 archiveBelow 的归档；pinned 卡免疫。失败只告警，不影响前面步骤的
+//      结果（报告 decayed/archived 置 0）。
 // tick/run 全程防重入、永不 throw。
 //
 // 本文件只消费结构化的 `ConsolidateConfig` 子接口（字段名 / 类型与 Task 6 的
@@ -26,6 +30,10 @@ import { sanitizeForWrite } from './sanitize.ts'
 export interface ConsolidateConfig {
   /** Idle time (minutes) before consolidation runs. */
   consolidateIdleMinutes?: number
+  /** Daily decay factor applied to card salience. */
+  decayLambdaPerDay?: number
+  /** Archive cards whose salience decays below this. */
+  decayArchiveBelow?: number
 }
 
 export interface ConsolidateLogger {
@@ -49,11 +57,15 @@ export interface ConsolidateReport {
   distilled: number
   superseded: number
   recompiled: boolean
+  decayed: number
+  archived: number
 }
 
 const DAY_MS = 24 * 3600_000
 const DISTILL_WINDOW_DAYS = 7
 const DEFAULT_IDLE_MINUTES = 30
+const DEFAULT_DECAY_LAMBDA_PER_DAY = 0.02
+const DEFAULT_DECAY_ARCHIVE_BELOW = 0.2
 
 const DISTILL_SYSTEM = '你是记忆蒸馏器。把一批过期便签提炼成少量值得长期保存的记忆条目，严格按标记逐行输出；没有值得记的就输出（无）。不要输出任何其他内容。'
 const RECOMPILE_SYSTEM = '你是画像合并编辑器。把已批准的用户画像建议合并进现有画像文本，保持简洁、自包含，不丢失既有信息。只输出合并后的完整画像文本，不要输出任何其他内容。'
@@ -88,7 +100,7 @@ export class Consolidator {
 
   /** 立即执行一次完整流水线（测试/手动）。重入时返回全零报告。 */
   async run(now: Date = new Date()): Promise<ConsolidateReport> {
-    if (this.running) return { distilled: 0, superseded: 0, recompiled: false }
+    if (this.running) return { distilled: 0, superseded: 0, recompiled: false, decayed: 0, archived: 0 }
     this.running = true
     try {
       // ⓪ Drain the warm-path retry queue first: those turns were extracted
@@ -103,9 +115,24 @@ export class Consolidator {
       const distilled = await this.distillNotes(now)
       const superseded = this.resolveFactConflicts()
       const recompiled = await this.recompileHumanBlock()
-      return { distilled, superseded, recompiled }
+      const decay = this.settleDecay(now)
+      return { distilled, superseded, recompiled, decayed: decay.decayed, archived: decay.archived }
     } finally {
       this.running = false
+    }
+  }
+
+  /** ⑤ 衰减结算：pinned 卡免疫由 store 层保证；失败置零，不拖垮整轮。 */
+  private settleDecay(now: Date): { decayed: number; archived: number } {
+    try {
+      return this.deps.store.settleDecay(
+        now.toISOString(),
+        this.deps.config.decayLambdaPerDay ?? DEFAULT_DECAY_LAMBDA_PER_DAY,
+        this.deps.config.decayArchiveBelow ?? DEFAULT_DECAY_ARCHIVE_BELOW,
+      )
+    } catch (error) {
+      this.deps.logger.warn(`memory-core: failed to settle decay: ${String(error)}`)
+      return { decayed: 0, archived: 0 }
     }
   }
 
