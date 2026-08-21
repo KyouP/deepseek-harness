@@ -27,8 +27,12 @@ afterEach(() => {
 /** Insert a card whose recorded_at is today's month-day, `yearsAgo` years back. */
 function seedAnniversaryCard(store: MemoryStore, summary: string, yearsAgo = 1): void {
   const card = store.insertCard({ summary, content: `${summary} 的全文` })
+  // 固定在本地正午再回拨年份：anniversaryCards 用 strftime('%m-%d', recorded_at)
+  // 按 UTC 月-日匹配、而 today 来自 localToday() 本地月-日——正午时刻两种历法的
+  // 日期一致（本地 0-8 点 UTC+8 时 direct "now" 会错一天，造成夜间 TZ flake）。
   const recorded = new Date()
-  recorded.setUTCFullYear(recorded.getUTCFullYear() - yearsAgo)
+  recorded.setHours(12, 0, 0, 0)
+  recorded.setFullYear(recorded.getFullYear() - yearsAgo)
   store.db.prepare('UPDATE cards SET recorded_at = ? WHERE id = ?').run(recorded.toISOString(), card.id)
 }
 
