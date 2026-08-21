@@ -285,7 +285,7 @@ node -e "const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('F
 | 1.1 | 人格块注入 | ☐ | |
 | 1.2 | 画像自编辑+跨会话 | ☐ | |
 | 2.1 | memory_store 存入 | ☐ | |
-| 2.2 | memory_recall 检索 | ☐ | CJK 前缀限制已知 |
+| 2.2 | memory_recall 检索 | ☐ | v2 trigram 已解除 CJK 前缀限制 |
 | 2.3 | memory_expand 展开 | ☐ | |
 | 3.1-3.3 | 承诺建立/注入/到期提醒 | ☐ | 3.3 建议改数据加速 |
 | 4 | 便签 24h 窗口 | ☐ | |
