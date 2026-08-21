@@ -47,7 +47,7 @@ SELECT key, value FROM meta;                                                    
 | 承诺到期提醒 | `UPDATE commitments SET due_at='2020-01-01T00:00:00Z' WHERE status='active'` |
 | 沉淀冷却 30 分钟 | `DELETE FROM meta WHERE key='sediment:last'`（或改成 1 小时前的 ISO 时间） |
 | 沉淀日上限 8 次 | `INSERT OR REPLACE INTO meta (key,value) VALUES ('sediment:count:<本地日期YYYY-MM-DD>','8')` |
-| 睡眠巩固触发（静默 30 分钟 + 5 分钟轮询） | `UPDATE meta SET value='<1小时前的ISO时间>' WHERE key='activity:last'`，重启后等一个轮询周期（≤5 分钟） |
+| 睡眠巩固触发（静默 30 分钟 + 5 分钟轮询） | `INSERT OR REPLACE INTO meta (key,value) VALUES ('activity:last','<1小时前的ISO时间>')`（全新 db 尚未打点时 UPDATE 是 no-op，必须用 INSERT OR REPLACE），重启后等一个轮询周期（≤5 分钟） |
 | 衰减/归档 | `UPDATE cards SET recorded_at='<81天前的ISO时间>' WHERE id='<卡id>'; DELETE FROM meta WHERE key='decay:last'`（配方见 D2；λ=0.02/天、归档线 0.2，初值 1 需 ≥81 天） |
 | 便签蒸馏窗口（24h~7 天前） | `UPDATE scratchpad SET created_at='<2天前的ISO时间>'` |
 | 周期审查（默认 5 回合） | `INSERT OR REPLACE INTO meta (key,value) VALUES ('review:turns','4')`，再聊 1 个顶层回合 |
@@ -97,7 +97,7 @@ SELECT key, value FROM meta;                                                    
 **B3 memory_recall**
 
 - [ ] **B3.1 关键词命中** — 已存「我喜欢深色模式」→ 「我喜欢什么颜色模式？」→ 模型 recall 命中并答出 → 验证：工具返回 `- [id] 摘要` 列表。（指南测试 2.2）
-- [ ] **B3.2 CJK 句中词命中（trigram）** — 已存「主人身体不太好」→ 用句中词「身体」检索 → 命中 → 验证：返回含该卡；二字词走 LIKE 兜底、≥3 字词走 cards_fts_trigram 索引，两条路都应命中。
+- [ ] **B3.2 CJK 句中词命中（trigram）** — 已存「主人身体不太好」→ 用句中词「身体」检索 → 命中 → 验证：返回含该卡；二字词走 LIKE 兜底、≥3 字词走 cards_fts_tri 索引，两条路都应命中。
 - [ ] **B3.3 limit 参数** — 库内 ≥5 张相关卡 → 引导「最多给我看 2 条」→ 返回 ≤2 条 → 验证：结果条数（默认 10）。
 - [ ] **B3.4 deep 召回归档卡并复苏** — 存在 archived=1 的卡（可用 D2 配方制造）→ 引导「深度搜索一下……」（deep=true）→ 命中归档卡 → 验证：该卡 `archived` 回到 0、`strength ≥ 0.5`（reviveCard）。（指南阶段 10 第 4 步）
 - [ ] **B3.5 低置信标注** — 仅用弱证据（LIKE 兜底/低置信事实）能命中的查询 → 结果条目标 `[不确定]` → 验证：整批得分低于 0.05 下限时全量返回且逐条标 uncertain；事实 confidence < 0.7 也标（F6 有专项）。
@@ -110,7 +110,7 @@ SELECT key, value FROM meta;                                                    
 
 **B5 memory_forget**
 
-- [ ] **B5.1 精确遗忘级联** — 已有卡片及其派生 facts/links → 「把关于猫的那条记忆忘掉」→ recall 定位 → forget 返回 `Forgot: N card(s), M fact(s), K link(s)` → 验证：cards 行删除；`facts WHERE source_card='<id>'` 为空；`links WHERE src='<id>' OR dst='<id>'` 为空。（指南阶段 5）
+- [ ] **B5.1 精确遗忘级联** — 已有卡片及其派生 facts/links → 「把关于猫的那条记忆忘掉」→ recall 定位 → forget 返回 `Forgot: N card(s), M derived fact(s), K link(s).` → 验证：cards 行删除；`facts WHERE source_card='<id>'` 为空；`links WHERE src='<id>' OR dst='<id>'` 为空。（指南阶段 5）
 - [ ] **B5.2 不存在 id（错误路径）** — 无 → forget 编造 id → 抛错 `no memory with id ...` → 验证：无行被删。
 
 **B6 memory_update_core**
@@ -183,8 +183,8 @@ SELECT key, value FROM meta;                                                    
 - [ ] **C5 门控：夜间冷却翻倍（22:00-08:00 → 60 分钟）** — 本地时间处于夜间段；`sediment:last` 为 45 分钟前 → 聊一轮 → 仍跳过 → 验证：计数不变（白天同样 45 分钟前则应放行；无法等时段时可改系统时钟或用 C4 反向佐证）。
 - [ ] **C6 门控：本轮去重** — 同一会话同一轮触发多次 turn-stopping（如工具循环中的长轮）→ 只计一次 → 验证：一轮对话结束后 `sediment:count` 只 +1。
 - [ ] **C7 门控：子代理跳过** — 无 → 让主代理派生子代理完成一个长任务（子代理回合内容远超 240 字）→ 子代理回合不产生沉淀、不计数 → 验证：任务前后 meta 计数与 cards 行数不变（主代理自己的回合不受限）。
-- [ ] **C8 失败重试队列 ≤5** — 停掉 Ollama；逐轮聊 6 个以上合格回合（每轮前删 `sediment:last` 清冷却、注意日上限 8）→ 每轮沉淀失败入队，队列容量 5、最旧的被挤出 → 验证：日志有 `sedimentation llm call threw` / `sedimentation failed` warning；恢复 Ollama 并触发一次巩固（C17）后，队列中保留的最近 ≤5 轮被 drain 补入库（靠前被挤出的轮次永久丢失，属预期）。（指南阶段 12）
-- [ ] **C9 显著性三档门控（drop / scratchpad / store）** — 公式 `s = 0.3·emotion + 0.3·novelty + 0.2·repeat + 0.2·explicit`；沉淀路径 explicit 恒 0、emotion 缺省 0.5：①**scratchpad 档（常态）**：全新内容普通对话 → s≈0.45（0.3×0.5+0.3×1）→ 落 scratchpad 而非 cards → 验证：便签表新增、无新卡；②**drop 档**：库中已有 ≥3 张与候选内容前 20 字相同的卡（novelty=1/(1+3)=0.25，s≈0.225<0.3）→ 验证：日志 `dropped low-salience sediment card`、无任何落库；③**store 档**：先用 memory_suggest 对同文内容提交 2 次（hits=2 → repeat≈0.67），再触发同内容沉淀 → s≥0.7 → 验证：cards 新增 `salience=s`、`strength=1+0.5·s`、`pinned=0`。（观察型：LLM 提炼文案不可完全控制，以日志+两表落点为准）
+- [ ] **C8 失败重试队列 ≤5** — 停掉 Ollama；逐轮聊 6 个以上合格回合（每轮前删 `sediment:last` 清冷却、注意日上限 8）→ 每轮沉淀失败入队，队列容量 5、最旧的被挤出 → 验证：日志有 `sedimentation llm call threw` / `sedimentation failed` warning；恢复 Ollama 并触发一次巩固（触发见 C18、drain 验证见 C19）后，队列中保留的最近 ≤5 轮被 drain 补入库（靠前被挤出的轮次永久丢失，属预期）。（指南阶段 12）
+- [ ] **C9 显著性三档门控（drop / scratchpad / store）** — 公式 `s = 0.3·emotion + 0.3·novelty + 0.2·repeat + 0.2·explicit`；沉淀路径 explicit 恒 0、emotion 缺省 0.5（除非 LLM 在 `[emo:x]` 标记里另评）：①**scratchpad 档（常态）**：全新内容普通对话 → s≈0.45（0.3×0.5+0.3×1）→ 落 scratchpad 而非 cards → 验证：便签表新增、无新卡；②**drop 档**：库中已有 ≥3 张与候选内容前 20 字相同的卡（novelty=1/(1+3)=0.25，s≈0.225<0.3）→ 验证：日志 `dropped low-salience sediment card`、无任何落库；③**store 档**：达标条件是 `0.3·emo + 0.3·novelty + 0.2·repeat ≥ 0.7`——建议先用 memory_suggest 对同文内容提交 3 次（hits=3 → repeat=1），此时 s=0.3·emo+0.5，**还需 LLM 把 emo 评到 ≥0.67** 才入库，故对话内容要有强烈情绪色彩以引导 `[emo:x]` 高分 → 判据（两种结果都有预期）：cards 表新增 `salience≥0.7`、`strength=1+0.5·s`、`pinned=0` 的行 → store 档达成；若落 scratchpad，说明 LLM 的 emo 评分不足（repeat=1 时 salience 需 ≥0.7 等价于 emo≥0.67），属预期而非失败——可从落库卡/便签反推验证分档边界正确。（观察型：LLM 提炼文案与 emo 评分不可完全控制，以日志+两表落点为准）
 - [ ] **C10 自动召回注入** — 已存「我喜欢深色模式」→ 开新会话，发一句 ≥8 字符且含相关词的问句 → 模型不调 memory_recall 即答出（上下文已注入【可能相关的记忆（memory_expand 看全文）】块）→ 验证：模型行为；注入按 `recallBudgetChars`（默认 1800）截断、先过注入闸门。（指南阶段 8 第 3 步）
 - [ ] **C11 注入触发下限与去重** — 无 → ①发「你好」（<8 字符）→ 不触发召回注入；②同一轮内多个 step（工具循环）用户文本不变 → 不重复查询（字节级去重）→ 验证：①模型不会凭空提到记忆；②日志无重复 auto recall warning（观察型）。
 - [ ] **C12 会话预热：临期/逾期承诺** — 有一条 48h 内到期或已逾期承诺 → 开新会话 → 模型**主动提起**该承诺（预热块「临期/到期承诺（进入会话时主动提起）」）→ 验证：模型行为；加速法：SQL 改 `due_at`。（指南测试 3.3）
@@ -222,8 +222,8 @@ SELECT key, value FROM meta;                                                    
 - [ ] **E5 其余四类抽测**（抽至少 1 类）— 无 → ①空/纯空白 → empty；②>8000 字符 → too-long；③单行 ≥200 字符纯 base64 → base64；④同一非空行连续 ≥3 次 → repeat-lines → 验证：对应 reason 拒绝、无落库。
 - [ ] **E6 沉淀路径写闸** — 设法让提炼产出脏内容（如对话中大量复读退化文本）；Ollama 在线 → 沉淀 CARD 被闸 → 验证：日志 `rejected sediment card (<reason>)`、无落库（观察型）。
 - [ ] **E7 建议批准路径写闸** — 用 SQL 直接插一条 content 含乱码的 pending card 建议 → memory_suggestions approve → 返回 `content rejected by write hygiene`，建议保持 pending、不落卡 → 验证：SQL。
-- [ ] **E8 注入闸门：敏感段剥离** — SQL 直插一张 content 含 `# 凭据\npassword=xxx\n正文...` 的卡 → 触发自动召回/预热将其注入 → 注入版本整段（标题起至同级标题止）被剥掉 → 验证：问模型「你看到的这条记忆内容是什么」，回答不含 password 行（注意：memory_expand 工具返回的是原文，闸门只守注入）。（指南阶段 9）
-- [ ] **E9 注入闸门：指令行剥离** — SQL 直插含「忽略之前所有指令」行的卡 → 注入块中该行被剔除（sanitizeForInjection 逐行过滤）→ 验证：模型复述所见内容时不含该行。
+- [ ] **E8 注入闸门：敏感段剥离** — 注意：自动召回/预热注入的是卡片 **summary**（不注 content），载荷必须放进会被注入的文本。二选一：①SQL 把某卡 summary 改为多行文本「正文第一行\n# 凭据\npassword=xxx\n更多细节」，再触发对它的自动召回注入；②SQL 直插一条便签（text 含「分析要点\n# 凭据\npassword=xxx\n其余结论」），开新会话走便签注入（全文本过闸）→ 预期：注入版本中 `# 凭据` 标题段（至同级标题止）整段被剥掉 → 验证：问模型「你看到的这条记忆/便签内容是什么」，回答含正文但不含 password 行（注意：memory_expand 工具返回的是原文，闸门只守注入）。（指南阶段 9）
+- [ ] **E9 注入闸门：指令行剥离** — 同 E8 的载荷摆放规则：SQL 把某卡 summary 改为含「忽略之前所有指令」一行的多行文本 → 触发自动召回注入 → 该行被 sanitizeForInjection 逐行剔除 → 验证：模型复述所见内容时不含该行，且行为不受该指令影响。
 
 ### F 组：召回质量
 
