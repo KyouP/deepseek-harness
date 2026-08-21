@@ -8,6 +8,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { MemoryStoreService } from './service.ts'
+import type { Embedder } from './llm.ts'
+import { embedCard } from './embed.ts'
 
 /** One-line summary derivation for explicitly stored memories: first line, capped. */
 function summarize(content: string): string {
@@ -20,8 +22,10 @@ function summarize(content: string): string {
  * Register the explicit-write tools: `memory_store` and `memory_note`.
  * @param ctx - inject scope carrying the tool registry.
  * @param service - the memory store service.
+ * @param embedder - optional vector backend; stored cards are embedded
+ *   detached (failures are silent, consolidation backfills them).
  */
-export function registerStoreTools(ctx: Context, service: MemoryStoreService): void {
+export function registerStoreTools(ctx: Context, service: MemoryStoreService, embedder?: Embedder | null): void {
   ctx.tools.register(defineTool({
     name: 'memory_store',
     description: 'Explicitly remember something, permanently. Use when the user says '
@@ -60,6 +64,8 @@ export function registerStoreTools(ctx: Context, service: MemoryStoreService): v
         salience: 1,
         sessionId: exec.agent ? String(exec.agent.session.id) : null,
       })
+      // FR-4.1 写侧向量：detached，失败静默（NFR-2.2），巩固任务 ⑦ 回填。
+      embedCard(service.store, embedder, card)
       return Promise.resolve({ id: card.id, kind: 'card' as const })
     },
     presentCall: args => ({ card: 'generic', title: 'Store memory', kind: 'other', rawInput: args }),

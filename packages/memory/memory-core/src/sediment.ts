@@ -11,7 +11,8 @@
 // 完整插件 Config 一致），不 import index.ts 的 Config。
 
 import type { MemoryStore } from '@deepseek-ai/dsh-memory-store'
-import type { LlmBackend } from './llm.ts'
+import type { Embedder, LlmBackend } from './llm.ts'
+import { embedCard } from './embed.ts'
 import { sanitizeForWrite } from './sanitize.ts'
 
 export interface SedimentConfig {
@@ -43,6 +44,8 @@ export interface SedimentDeps {
   llm: LlmBackend
   config: SedimentConfig
   logger: { warn(msg: string): void }
+  /** 向量后端（可选）：卡片入库后 detached embed；null 时静默跳过（NFR-2.2）。 */
+  embedder?: Embedder | null
 }
 
 export type SedimentResult = 'stored' | 'empty' | 'skipped' | 'failed'
@@ -87,6 +90,8 @@ export function parseSedimentOutput(text: string): SedimentItem[] {
 export interface SedimentRouteDeps {
   store: MemoryStore
   logger: { warn(msg: string): void }
+  /** 向量后端（可选）：卡片路由入库后 detached embed；null 时静默跳过。 */
+  embedder?: Embedder | null
 }
 
 /** Where a sediment item came from; recorded on cards for scoped recall. */
@@ -132,7 +137,7 @@ function routeCard(content: string, deps: SedimentRouteDeps, provenance: Sedimen
     return false
   }
   const firstLine = verdict.text.split('\n', 1)[0] ?? ''
-  deps.store.insertCard({
+  const card = deps.store.insertCard({
     summary: firstLine.slice(0, 60),
     content: verdict.text,
     salience: 0.5,
@@ -140,6 +145,8 @@ function routeCard(content: string, deps: SedimentRouteDeps, provenance: Sedimen
     sessionId: provenance.sessionId ?? null,
     workspace: provenance.workspace ?? null,
   })
+  // FR-4.1 写侧向量：detached，失败静默，由巩固任务 ⑦ 回填兜底。
+  embedCard(deps.store, deps.embedder, card)
   return true
 }
 

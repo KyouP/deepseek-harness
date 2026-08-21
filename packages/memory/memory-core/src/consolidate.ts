@@ -17,13 +17,17 @@
 //      按 max(decay:last 水位, 卡 recorded_at) 起算的 Δt 指数衰减非 pinned 卡，
 //      低于 archiveBelow 的归档；pinned 卡免疫。失败只告警，不影响前面步骤的
 //      结果（报告 decayed/archived 置 0）。
+//   ⑦ embedding 回填——仅 embedEnabled 且有向量后端时：
+//      cardsWithoutEmbeddings(20) → 批量 embed → setEmbedding；失败容忍，
+//      报告 embedded 计数，绝不 throw（写侧 sediment / memory_store 漏嵌的
+//      卡由这里兜底）。
 // tick/run 全程防重入、永不 throw。
 //
 // 本文件只消费结构化的 `ConsolidateConfig` 子接口（字段名 / 类型与 Task 6 的
 // 完整插件 Config 一致），不 import index.ts 的 Config。
 
 import type { Fact, MemoryStore, NewFact, Note, Suggestion } from '@deepseek-ai/dsh-memory-store'
-import type { LlmBackend } from './llm.ts'
+import type { Embedder, LlmBackend } from './llm.ts'
 import { parseSedimentOutput, routeSedimentItem } from './sediment.ts'
 import { sanitizeForWrite } from './sanitize.ts'
 
@@ -34,6 +38,8 @@ export interface ConsolidateConfig {
   decayLambdaPerDay?: number
   /** Archive cards whose salience decays below this. */
   decayArchiveBelow?: number
+  /** Enable the embedding backend (gates step ⑦ backfill). */
+  embedEnabled?: boolean
 }
 
 export interface ConsolidateLogger {
@@ -51,6 +57,8 @@ export interface ConsolidateDeps {
   config: ConsolidateConfig
   logger: ConsolidateLogger
   sedimenter?: SedimentRetrier | undefined
+  /** 向量后端（可选）：⑦ embedding 回填用；null 或 embedEnabled=false 时跳过。 */
+  embedder?: Embedder | null
 }
 
 export interface ConsolidateReport {
@@ -59,7 +67,11 @@ export interface ConsolidateReport {
   recompiled: boolean
   decayed: number
   archived: number
+  /** ⑦ 本轮回填的卡片 embedding 数量。 */
+  embedded: number
 }
+
+const EMPTY_REPORT: ConsolidateReport = { distilled: 0, superseded: 0, recompiled: false, decayed: 0, archived: 0, embedded: 0 }
 
 const DAY_MS = 24 * 3600_000
 const DISTILL_WINDOW_DAYS = 7
@@ -100,7 +112,7 @@ export class Consolidator {
 
   /** 立即执行一次完整流水线（测试/手动）。重入时返回全零报告。 */
   async run(now: Date = new Date()): Promise<ConsolidateReport> {
-    if (this.running) return { distilled: 0, superseded: 0, recompiled: false, decayed: 0, archived: 0 }
+    if (this.running) return { ...EMPTY_REPORT }
     this.running = true
     try {
       // ⓪ Drain the warm-path retry queue first: those turns were extracted
@@ -116,10 +128,50 @@ export class Consolidator {
       const superseded = this.resolveFactConflicts()
       const recompiled = await this.recompileHumanBlock()
       const decay = this.settleDecay(now)
-      return { distilled, superseded, recompiled, decayed: decay.decayed, archived: decay.archived }
+      const embedded = await this.backfillEmbeddings()
+      return { distilled, superseded, recompiled, decayed: decay.decayed, archived: decay.archived, embedded }
     } finally {
       this.running = false
     }
+  }
+
+  /**
+   * ⑦ embedding 回填（FR-4.1）：embedEnabled 且有向量后端时，取
+   * cardsWithoutEmbeddings(20) 批量 embed 并 setEmbedding 落库。失败容忍：
+   * embedder null/throw/缺行都记 0 或部分成功，绝不 throw、绝不拖垮整轮；
+   * 写侧（sediment / memory_store）漏掉的卡由这里兜底。
+   */
+  private async backfillEmbeddings(): Promise<number> {
+    if (!(this.deps.config.embedEnabled ?? false)) return 0
+    const embedder = this.deps.embedder
+    if (!embedder) return 0
+    let pending: { id: string, text: string }[]
+    try {
+      pending = this.deps.store.cardsWithoutEmbeddings(20)
+    } catch {
+      return 0
+    }
+    if (pending.length === 0) return 0
+    let vectors: number[][] | null
+    try {
+      vectors = await embedder.embed(pending.map(entry => entry.text))
+    } catch (error) {
+      this.deps.logger.warn(`memory-core: embedding backfill llm call threw: ${String(error)}`)
+      return 0
+    }
+    if (!vectors) return 0
+    let embedded = 0
+    for (let i = 0; i < pending.length; i++) {
+      const vector = vectors[i]
+      if (!vector || vector.length === 0) continue
+      try {
+        this.deps.store.setEmbedding(pending[i]!.id, vector)
+        embedded++
+      } catch (error) {
+        this.deps.logger.warn(`memory-core: failed to store embedding for ${pending[i]!.id}: ${String(error)}`)
+      }
+    }
+    return embedded
   }
 
   /** ⑤ 衰减结算：pinned 卡免疫由 store 层保证；失败置零，不拖垮整轮。 */

@@ -5,12 +5,17 @@
  * workspace scoping) builds on {@link rankedRecall}.
  *
  * Scoring: `score = α·bm25norm + γ·(strength/5) + δ·linkBoost + ε·recency
- * + pinBoost + salienceBoost`, with α=0.5, γ=0.2, δ=0.1, ε=0.1,
+ * + pinBoost + salienceBoost + vecBoost`, with α=0.5, γ=0.2, δ=0.1, ε=0.1,
  * pinBoost=+0.15, salienceBoost=+0.1·salience, recency=exp(-days/30).
+ * vecBoost is the FR-4.1 vector channel: when the caller passes a
+ * `queryVector`, the top-20 cosine neighbours among embedded cards join as a
+ * channel whose RRF rank score enters at weight +0.15; without it (embedder
+ * off/failed) results are identical to the bm25-only baseline (NFR-2.2).
  * @module
  */
 
 import type { Card, MemoryStore } from '@deepseek-ai/dsh-memory-store'
+import { cosine, rrfMerge } from './embed.ts'
 
 /** One ranked recall hit: either a card or a fact triple. */
 export interface RankedHit {
@@ -34,6 +39,13 @@ export interface RankedRecallOptions {
   workspace?: string | null
   /** Give same-workspace cards a small boost (full scoping lands in Task 20). */
   workspaceScope?: boolean
+  /**
+   * Pre-embedded query vector (FR-4.1 vector channel). Callers that can
+   * afford one awaited embedder call (memory_recall) pass it here; absent or
+   * failed embeds degrade to the bm25-only baseline (NFR-2.2). The channel
+   * adds an RRF rank score at weight +0.15 (see VECTOR_WEIGHT).
+   */
+  queryVector?: number[] | null
 }
 
 const ALPHA = 0.5
@@ -51,6 +63,10 @@ const FACT_BASELINE = 0.3
 const FACT_CONFIDENCE_WEIGHT = 0.1
 /** FR-3.4: facts less confident than this are marked uncertain. */
 const FACT_UNCERTAIN_BELOW = 0.7
+/** FR-4.1: the vector channel's RRF rank score joins at this weight. */
+const VECTOR_WEIGHT = 0.15
+/** The vector channel keeps at most this many cosine neighbours. */
+const VECTOR_CHANNEL_LIMIT = 20
 /** Recency decay horizon: score contribution halves roughly every 21 days. */
 const RECENCY_DAYS = 30
 /** FR-7.1 reinforcement half: how much an accessed card's strength grows. */
@@ -63,6 +79,8 @@ interface Candidate {
   rank: number
   /** 1 when a top-5 hit links to this candidate. */
   linkBoost: number
+  /** FR-4.1 vector channel: RRF rank score normalized to [0, VECTOR_WEIGHT]. */
+  vecBoost: number
 }
 
 /**
@@ -97,7 +115,34 @@ export function rankedRecall(store: MemoryStore, query: string, opts: RankedReca
   ]) {
     const prev = candidates.get(hit.id)
     if (!prev || hit.rank < prev.rank) {
-      candidates.set(hit.id, { id: hit.id, summary: hit.summary, rank: hit.rank, linkBoost: 0 })
+      candidates.set(hit.id, { id: hit.id, summary: hit.summary, rank: hit.rank, linkBoost: 0, vecBoost: 0 })
+    }
+  }
+
+  // FR-4.1 vector channel: full cosine scan of the embedded cards, top-20,
+  // fused as an RRF rank score at weight +0.15. A store fault (or a disabled
+  // embedder upstream) degrades to the bm25-only baseline (NFR-2.2).
+  if (opts.queryVector && opts.queryVector.length > 0) {
+    try {
+      const query = opts.queryVector
+      const vectorHits = store.cardsWithEmbeddings()
+        .map(entry => ({ id: entry.id, sim: cosine(query, entry.vector) }))
+        .filter(entry => entry.sim > 0)
+        .sort((a, b) => b.sim - a.sim || a.id.localeCompare(b.id))
+        .slice(0, VECTOR_CHANNEL_LIMIT)
+      const rrf = rrfMerge([vectorHits])
+      let bestRrf = 0
+      for (const score of rrf.values()) if (score > bestRrf) bestRrf = score
+      if (bestRrf > 0) {
+        for (const [id, score] of rrf) {
+          const boost = VECTOR_WEIGHT * (score / bestRrf)
+          const existing = candidates.get(id)
+          if (existing) existing.vecBoost = boost
+          else candidates.set(id, { id, summary: '', rank: Number.POSITIVE_INFINITY, linkBoost: 0, vecBoost: boost })
+        }
+      }
+    } catch {
+      // NFR-2.2: vector channel failure must never break keyword recall.
     }
   }
 
@@ -122,7 +167,7 @@ export function rankedRecall(store: MemoryStore, query: string, opts: RankedReca
     for (const neighbor of store.linkedNeighbors(top.id, 5)) {
       const existing = candidates.get(neighbor.id)
       if (existing) existing.linkBoost = 1
-      else candidates.set(neighbor.id, { id: neighbor.id, summary: neighbor.summary, rank: Number.POSITIVE_INFINITY, linkBoost: 1 })
+      else candidates.set(neighbor.id, { id: neighbor.id, summary: neighbor.summary, rank: Number.POSITIVE_INFINITY, linkBoost: 1, vecBoost: 0 })
     }
   }
 
@@ -134,7 +179,7 @@ export function rankedRecall(store: MemoryStore, query: string, opts: RankedReca
     /* v8 ignore next -- candidates come from card-table JOINs, so the row always exists */
     if (!card) continue
     cards.set(card.id, card)
-    const fallbackOnly = !Number.isFinite(cand.rank) && cand.linkBoost === 0
+    const fallbackOnly = !Number.isFinite(cand.rank) && cand.linkBoost === 0 && cand.vecBoost === 0
     if (fallbackOnly) {
       scored.push({ id: card.id, kind: 'card', summary: card.summary, score: 0, uncertain: false })
       continue
@@ -145,6 +190,7 @@ export function rankedRecall(store: MemoryStore, query: string, opts: RankedReca
       + DELTA * cand.linkBoost
       + EPSILON * Math.exp(-days / RECENCY_DAYS)
       + SALIENCE_BOOST * card.salience
+      + cand.vecBoost
     if (card.pinned) score += PIN_BOOST
     if (opts.workspaceScope && opts.workspace && card.workspace === opts.workspace) score += WORKSPACE_BOOST
     scored.push({ id: card.id, kind: 'card', summary: card.summary, score, uncertain: false })

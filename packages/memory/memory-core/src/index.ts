@@ -18,7 +18,7 @@ import { registerCommitmentTools } from './tools-commitments.ts'
 import { registerBrowseTool } from './tools-browse.ts'
 import { mountInjections } from './injections.ts'
 import type { LlmConfig, LlmStreamLike } from './llm.ts'
-import { createBackend } from './llm.ts'
+import { createBackend, createEmbedder } from './llm.ts'
 import { Sedimenter, type AgentLike } from './sediment.ts'
 import { Consolidator } from './consolidate.ts'
 import { mountAutoRecall } from './auto-recall.ts'
@@ -177,8 +177,11 @@ export function apply(ctx: Context, config: Config): void {
       { persona: config.persona, human: config.human },
       { persona: config.personaBudgetChars ?? 3000, human: config.humanBudgetChars ?? 2500 },
     )
-    registerStoreTools(scope, scope.memoryStore)
-    registerRecallTools(scope, scope.memoryStore)
+    // 向量后端（FR-4.1）：embedEnabled=false 时为 null，所有消费方按
+    // "无向量通道"降级（NFR-2.2）——召回结果与关闭时一致，写侧跳过 embed。
+    const embedder = createEmbedder(config)
+    registerStoreTools(scope, scope.memoryStore, embedder)
+    registerRecallTools(scope, scope.memoryStore, embedder)
     registerCommitmentTools(scope, scope.memoryStore)
     registerBrowseTool(scope, scope.memoryStore)
     mountInjections(scope, scope.memoryStore, {
@@ -194,7 +197,7 @@ export function apply(ctx: Context, config: Config): void {
     // SQLite — no LLM — so it stays within the NFR-1.3 hot-path budget), and
     // the hmem:recall context provider renders it. recallAutoInject=false
     // turns both halves into no-ops.
-    mountAutoRecall(scope, scope.memoryStore.store, config)
+    mountAutoRecall(scope, scope.memoryStore.store, config, embedder)
 
     // Session preheat (FR-9.1): session-start marks the session, and the
     // hmem:preheat provider (order 12) emits a one-time warmup block —
@@ -211,8 +214,9 @@ export function apply(ctx: Context, config: Config): void {
       llm: llmBackend,
       config,
       logger: { warn: (msg) => { scope.logger.warn(msg) } },
+      embedder,
     })
-    // Sleep consolidation (FR-8.1/FR-8.2 ①②④): a self-managed 5-minute poll —
+    // Sleep consolidation (FR-8.1/FR-8.2 ①②④⑤⑦): a self-managed 5-minute poll —
     // DSH has no plugin cron API — runs the cold-path pipeline once the session
     // has been idle for consolidateIdleMinutes. The idle watermark
     // (activity:last) is stamped by Sedimenter.onTurnStopping every turn.
@@ -222,6 +226,7 @@ export function apply(ctx: Context, config: Config): void {
       config,
       logger: { warn: (msg) => { scope.logger.warn(msg) } },
       sedimenter,
+      embedder,
     })
     scope.effect(() => {
       const timer = setInterval(() => { void consolidator.tick().catch(() => {}) }, 5 * 60_000)
@@ -260,6 +265,9 @@ export { CoreBlockCache, HUMAN_BLOCK_ORDER, PERSONA_BLOCK_ORDER } from './core-b
 export { TRUNCATION_MARKER, budgetText, truncateChars } from './budget.ts'
 export { rankedRecall } from './recall.ts'
 export type { RankedHit, RankedRecallOptions } from './recall.ts'
+export { OllamaEmbedder, createEmbedder } from './llm.ts'
+export type { EmbedConfig, Embedder } from './llm.ts'
+export { cosine, embedCard, rrfMerge } from './embed.ts'
 export { AutoRecall, mountAutoRecall, RECALL_BLOCK_HEADER } from './auto-recall.ts'
 export type { AutoRecallConfig, AutoRecallLogger } from './auto-recall.ts'
 export { Preheat, mountPreheat } from './preheat.ts'

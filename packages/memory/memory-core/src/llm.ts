@@ -48,8 +48,18 @@ export interface Embedder {
   embed(texts: string[]): Promise<number[][] | null>
 }
 
+/**
+ * 向量通道配置的结构化子接口：字段名 / 类型与 Task 6 的完整插件 Config
+ * 一致（embedEnabled / embedModel 复用 ollamaHost 与 llmTimeoutMs）。
+ */
+export interface EmbedConfig extends LlmConfig {
+  embedEnabled?: boolean
+  embedModel?: string
+}
+
 const DEFAULT_OLLAMA_HOST = 'http://127.0.0.1:11434'
 const DEFAULT_OLLAMA_MODEL = 'qwen3.5:4b'
+const DEFAULT_EMBED_MODEL = 'bge-m3'
 const DEFAULT_TIMEOUT_MS = 90_000
 const DEFAULT_MAX_TOKENS = 1024
 
@@ -165,6 +175,50 @@ class NullBackend implements LlmBackend {
   async complete(): Promise<string | null> {
     return null
   }
+}
+
+/**
+ * Ollama 向量后端（FR-4.1）：POST {host}/api/embed {model, input: string[]} →
+ * {embeddings: number[][]}。任何失败（网络 / 非 200 / 异形响应）都返回
+ * null，由调用方降级为无向量通道（NFR-2.2），绝不 throw。
+ */
+export class OllamaEmbedder implements Embedder {
+  constructor(
+    private host: string,
+    private model: string,
+    private defaultTimeoutMs?: number,
+  ) {}
+
+  async embed(texts: string[]): Promise<number[][] | null> {
+    if (texts.length === 0) return []
+    try {
+      const res = await fetch(`${this.host}/api/embed`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: this.model, input: texts }),
+        signal: AbortSignal.timeout(this.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS),
+      })
+      if (!res.ok) return null
+      const data = await res.json() as { embeddings?: unknown }
+      if (!Array.isArray(data.embeddings)) return null
+      return data.embeddings as number[][]
+    } catch {
+      return null
+    }
+  }
+}
+
+/**
+ * 构造向量后端：embedEnabled 关闭时返回 null（调用方按"无向量通道"降级）。
+ * 目前只有 ollama 一路，复用 ollamaHost / llmTimeoutMs 配置。
+ */
+export function createEmbedder(config: EmbedConfig): Embedder | null {
+  if (!(config.embedEnabled ?? false)) return null
+  return new OllamaEmbedder(
+    config.ollamaHost || DEFAULT_OLLAMA_HOST,
+    config.embedModel || DEFAULT_EMBED_MODEL,
+    config.llmTimeoutMs,
+  )
 }
 
 class ChainBackend implements LlmBackend {

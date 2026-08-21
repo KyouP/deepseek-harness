@@ -16,6 +16,7 @@ import type { MemoryStore } from '@deepseek-ai/dsh-memory-store'
 import { truncateChars } from './budget.ts'
 import { sanitizeForInjection } from './sanitize.ts'
 import { rankedRecall, type RankedHit } from './recall.ts'
+import type { Embedder } from './llm.ts'
 
 /** Block header; names memory_expand so the model can pull the full text. */
 export const RECALL_BLOCK_HEADER = '【可能相关的记忆（memory_expand 看全文）】'
@@ -89,6 +90,7 @@ export class AutoRecall {
     private readonly store: MemoryStore,
     config: AutoRecallConfig,
     private readonly logger: AutoRecallLogger = NOOP_LOGGER,
+    private readonly embedder: Embedder | null = null,
   ) {
     this.enabled = config.recallAutoInject ?? true
     this.budgetChars = config.recallBudgetChars ?? DEFAULT_BUDGET_CHARS
@@ -100,6 +102,12 @@ export class AutoRecall {
    * it changed. Synchronous — a local SQLite ranked recall, no LLM. A store
    * fault degrades to an empty block and one warn per failure; it never
    * throws into the pre-step waterfall.
+   *
+   * FR-4.1 vector half: when an embedder is configured, the query embed is
+   * fired DETACHED (the hot path never awaits a network call). The first
+   * render of a changed query is bm25-only; once the query vector lands and
+   * the query is still current, the block is re-rendered with the vector
+   * channel. Embed failure degrades silently to the bm25-only block (NFR-2.2).
    */
   onPreStep(messages: { content: unknown }[]): void {
     if (!this.enabled) return
@@ -108,15 +116,38 @@ export class AutoRecall {
     // Cache the query even when the recall fails: an unchanged text must not
     // retry (and re-log) the same fault on every step of the turn.
     this.lastQuery = text
+    this.refresh(text)
+    this.fireQueryEmbed(text)
+  }
+
+  /** Synchronous local recall + render; degrades to an empty block on fault. */
+  private refresh(text: string, queryVector: number[] | null = null): void {
     let hits: RankedHit[]
     try {
-      hits = rankedRecall(this.store, text, { limit: AUTO_RECALL_LIMIT, floor: this.floor })
+      hits = rankedRecall(this.store, text, { limit: AUTO_RECALL_LIMIT, floor: this.floor, queryVector })
     } catch (error) {
       this.lastBlock = ''
       this.logger.warn(`memory-core: auto recall failed: ${String(error)}`)
       return
     }
     this.lastBlock = renderRecallBlock(hits, this.budgetChars)
+  }
+
+  /** Detached query embed; re-renders with the vector channel when it lands. */
+  private fireQueryEmbed(text: string): void {
+    const embedder = this.embedder
+    if (!embedder) return
+    void embedder.embed([text])
+      .then((vectors) => {
+        const vector = vectors?.[0]
+        // A newer query already superseded this one: its own embed will
+        // refresh the block; re-rendering with a stale vector would be wrong.
+        if (!vector || vector.length === 0 || text !== this.lastQuery) return
+        this.refresh(text, vector)
+      })
+      .catch(() => {
+        // silent by design (NFR-2.2): the bm25-only block already rendered
+      })
   }
 
   /** Context-provider render: the cached budgeted block, or '' when idle/off. */
@@ -132,11 +163,12 @@ export class AutoRecall {
  * @param ctx - inject scope carrying the system prompt service.
  * @param store - the memory store.
  * @param config - plugin configuration (recallAutoInject gates both halves).
+ * @param embedder - optional vector backend (null when embedEnabled is off).
  */
-export function mountAutoRecall(ctx: Context, store: MemoryStore, config: AutoRecallConfig): void {
+export function mountAutoRecall(ctx: Context, store: MemoryStore, config: AutoRecallConfig, embedder: Embedder | null = null): void {
   const autoRecall = new AutoRecall(store, config, {
     warn: (message) => { ctx.logger.warn(message) },
-  })
+  }, embedder)
   // This package does not depend on @deepseek-ai/dsh-agent, so the event is
   // not in the local Events augmentation (same pattern as the sediment hook).
   const events = ctx as unknown as {

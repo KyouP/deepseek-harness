@@ -8,14 +8,30 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { MemoryStoreService } from './service.ts'
+import type { Embedder } from './llm.ts'
 import { rankedRecall } from './recall.ts'
+
+/**
+ * Embed the recall query once (FR-4.1 热路径单次调用); any failure degrades
+ * to the bm25-only baseline without a throw (NFR-2.2).
+ */
+async function embedQuery(embedder: Embedder | null | undefined, query: string): Promise<number[] | null> {
+  if (!embedder) return null
+  try {
+    return (await embedder.embed([query]))?.[0] ?? null
+  } catch {
+    return null
+  }
+}
 
 /**
  * Register the read-path tools: `memory_recall`, `memory_expand`, `memory_forget`.
  * @param ctx - inject scope carrying the tool registry.
  * @param service - the memory store service.
+ * @param embedder - optional vector backend; memory_recall embeds the query
+ *   once per call (failure degrades to bm25-only, never throws).
  */
-export function registerRecallTools(ctx: Context, service: MemoryStoreService): void {
+export function registerRecallTools(ctx: Context, service: MemoryStoreService, embedder?: Embedder | null): void {
   ctx.tools.register(defineTool({
     name: 'memory_recall',
     description: 'Search your long-term memory. Returns one-line summaries; call '
@@ -56,14 +72,16 @@ export function registerRecallTools(ctx: Context, service: MemoryStoreService): 
           ).join('\n'),
       }],
     },
-    execute(args) {
+    async execute(args) {
+      const queryVector = await embedQuery(embedder, args.query)
       const hits = rankedRecall(service.store, args.query, {
         limit: args.limit ?? 10,
         deep: args.deep ?? false,
+        queryVector,
       })
-      return Promise.resolve({
+      return {
         results: hits.map(h => ({ id: h.id, summary: h.summary, kind: h.kind, uncertain: h.uncertain })),
-      })
+      }
     },
     presentCall: args => ({ card: 'generic', title: 'Recall memory', kind: 'read', rawInput: args }),
   }))
