@@ -20,6 +20,7 @@ import { mountInjections } from './injections.ts'
 import type { LlmConfig, LlmStreamLike } from './llm.ts'
 import { createBackend } from './llm.ts'
 import { Sedimenter, type AgentLike } from './sediment.ts'
+import { Consolidator } from './consolidate.ts'
 import { mountAutoRecall } from './auto-recall.ts'
 import { mountPreheat } from './preheat.ts'
 import { TurnReview, isSubagentAgent } from './review.ts'
@@ -204,11 +205,27 @@ export function apply(ctx: Context, config: Config): void {
     // Warm-path auto sedimentation (FR-3.5/FR-6.5): after each turn closes,
     // distill its memorable items through the LLM backend and route them into
     // the store. Fire-and-forget — the hook never blocks the turn stop.
+    const llmBackend = createBackend(config, scope.get('llm', false) as unknown as LlmStreamLike | undefined)
     const sedimenter = new Sedimenter({
       store: scope.memoryStore.store,
-      llm: createBackend(config, scope.get('llm', false) as unknown as LlmStreamLike | undefined),
+      llm: llmBackend,
       config,
       logger: { warn: (msg) => { scope.logger.warn(msg) } },
+    })
+    // Sleep consolidation (FR-8.1/FR-8.2 ①②④): a self-managed 5-minute poll —
+    // DSH has no plugin cron API — runs the cold-path pipeline once the session
+    // has been idle for consolidateIdleMinutes. The idle watermark
+    // (activity:last) is stamped by Sedimenter.onTurnStopping every turn.
+    const consolidator = new Consolidator({
+      store: scope.memoryStore.store,
+      llm: llmBackend,
+      config,
+      logger: { warn: (msg) => { scope.logger.warn(msg) } },
+      sedimenter,
+    })
+    scope.effect(() => {
+      const timer = setInterval(() => { void consolidator.tick().catch(() => {}) }, 5 * 60_000)
+      return () => { clearInterval(timer) }
     })
     // Periodic sticky review (FR-8.0): after reviewIntervalTurns top-level
     // turns, the hmem:review provider (order 25 — late, right before the
@@ -249,6 +266,8 @@ export { Preheat, mountPreheat } from './preheat.ts'
 export type { PreheatConfig, PreheatLogger } from './preheat.ts'
 export { TurnReview, isSubagentAgent, REVIEW_PROMPT } from './review.ts'
 export type { ReviewConfig } from './review.ts'
+export { Consolidator } from './consolidate.ts'
+export type { ConsolidateConfig, ConsolidateDeps, ConsolidateLogger, ConsolidateReport, SedimentRetrier } from './consolidate.ts'
 export { registerReviewTools } from './tools-review.ts'
 export { browseSessions, DEFAULT_BROWSE_LIMIT, parseSessionJsonl } from './browse.ts'
 export type { BrowseSessionsOptions, BrowseSessionsResult, ParsedSession, SessionMessage } from './browse.ts'

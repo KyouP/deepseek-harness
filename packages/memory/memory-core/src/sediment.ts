@@ -83,6 +83,100 @@ export function parseSedimentOutput(text: string): SedimentItem[] {
   return items
 }
 
+/** Routing dependencies for {@link routeSedimentItem}. */
+export interface SedimentRouteDeps {
+  store: MemoryStore
+  logger: { warn(msg: string): void }
+}
+
+/** Where a sediment item came from; recorded on cards for scoped recall. */
+export interface SedimentProvenance {
+  sessionId?: string | null
+  workspace?: string | null
+}
+
+/**
+ * Route one parsed sediment item into the store (card / fact / commitment /
+ * user-suggestion queue). Returns true when the item was persisted. Shared by
+ * the warm-path Sedimenter and the cold-path Consolidator — profile edits
+ * always land in the suggestion queue, never touch core blocks directly.
+ */
+export function routeSedimentItem(
+  item: SedimentItem,
+  deps: SedimentRouteDeps,
+  provenance: SedimentProvenance = {},
+): boolean {
+  try {
+    switch (item.kind) {
+      case 'card':
+        return routeCard(item.content, deps, provenance)
+      case 'fact':
+        return routeFact(item.content, deps)
+      case 'commitment':
+        return routeCommitment(item.content, deps)
+      case 'user':
+        // 画像修改必须经确认/审查：恒入建议队列，绝不直接改核心块。
+        deps.store.addSuggestion({ kind: 'user', content: item.content })
+        return true
+    }
+  } catch (error) {
+    deps.logger.warn(`memory-core: failed to route sediment item: ${String(error)}`)
+    return false
+  }
+}
+
+function routeCard(content: string, deps: SedimentRouteDeps, provenance: SedimentProvenance): boolean {
+  const verdict = sanitizeForWrite(content)
+  if (!verdict.ok) {
+    deps.logger.warn(`memory-core: rejected sediment card (${verdict.reason})`)
+    return false
+  }
+  const firstLine = verdict.text.split('\n', 1)[0] ?? ''
+  deps.store.insertCard({
+    summary: firstLine.slice(0, 60),
+    content: verdict.text,
+    salience: 0.5,
+    pinned: false,
+    sessionId: provenance.sessionId ?? null,
+    workspace: provenance.workspace ?? null,
+  })
+  return true
+}
+
+function routeFact(content: string, deps: SedimentRouteDeps): boolean {
+  const parts = content.split(' | ').map(part => part.trim())
+  if (parts.length !== 3 || parts.some(part => !part)) {
+    deps.logger.warn(`memory-core: malformed sediment fact: ${content}`)
+    return false
+  }
+  const [subject, predicate, object] = parts as [string, string, string]
+  const existing = deps.store.activeFacts(subject).find(fact => fact.predicate === predicate)
+  if (existing && existing.object === object) return false
+  if (existing) {
+    deps.store.supersedeFact(existing.id, { subject, predicate, object })
+  } else {
+    deps.store.insertFact({ subject, predicate, object })
+  }
+  return true
+}
+
+function routeCommitment(content: string, deps: SedimentRouteDeps): boolean {
+  const segments = content.split(' | ')
+  let text = content.trim()
+  let dueAt: string | null = null
+  if (segments.length > 1) {
+    const maybe = segments.at(-1)?.trim() ?? ''
+    const parsed = Date.parse(maybe)
+    if (maybe && !Number.isNaN(parsed)) {
+      dueAt = new Date(parsed).toISOString()
+      text = segments.slice(0, -1).join(' | ').trim()
+    }
+  }
+  if (!text) return false
+  deps.store.addCommitment({ content: text, dueAt })
+  return true
+}
+
 /**
  * Extract the last turn: the final `user/message` event's text plus every
  * assistant `text-delta` chunk after it, concatenated. Returns null when the
@@ -269,7 +363,9 @@ export class Sedimenter {
     const trimmed = output.trim()
     if (!trimmed || trimmed === '（无）') return 'empty'
     const items = parseSedimentOutput(trimmed)
-    for (const item of items) this.route(item, entry)
+    for (const item of items) {
+      routeSedimentItem(item, this.deps, { sessionId: entry.sessionId, workspace: entry.workspace })
+    }
     return items.length > 0 ? 'stored' : 'empty'
   }
 
@@ -299,76 +395,5 @@ export class Sedimenter {
     }
     const joined = parts.filter(Boolean).join('\n')
     return joined.length > TAIL_BUDGET ? joined.slice(joined.length - TAIL_BUDGET) : joined
-  }
-
-  private route(item: SedimentItem, entry: PendingEntry): void {
-    try {
-      switch (item.kind) {
-        case 'card':
-          this.routeCard(item.content, entry)
-          break
-        case 'fact':
-          this.routeFact(item.content)
-          break
-        case 'commitment':
-          this.routeCommitment(item.content)
-          break
-        case 'user':
-          // 画像修改必须经确认/审查：恒入建议队列，绝不直接改核心块。
-          this.deps.store.addSuggestion({ kind: 'user', content: item.content })
-          break
-      }
-    } catch (error) {
-      this.deps.logger.warn(`memory-core: failed to route sediment item: ${String(error)}`)
-    }
-  }
-
-  private routeCard(content: string, entry: PendingEntry): void {
-    const verdict = sanitizeForWrite(content)
-    if (!verdict.ok) {
-      this.deps.logger.warn(`memory-core: rejected sediment card (${verdict.reason})`)
-      return
-    }
-    const firstLine = verdict.text.split('\n', 1)[0] ?? ''
-    this.deps.store.insertCard({
-      summary: firstLine.slice(0, 60),
-      content: verdict.text,
-      salience: 0.5,
-      pinned: false,
-      sessionId: entry.sessionId,
-      workspace: entry.workspace,
-    })
-  }
-
-  private routeFact(content: string): void {
-    const parts = content.split(' | ').map(part => part.trim())
-    if (parts.length !== 3 || parts.some(part => !part)) {
-      this.deps.logger.warn(`memory-core: malformed sediment fact: ${content}`)
-      return
-    }
-    const [subject, predicate, object] = parts as [string, string, string]
-    const existing = this.deps.store.activeFacts(subject).find(fact => fact.predicate === predicate)
-    if (existing && existing.object === object) return
-    if (existing) {
-      this.deps.store.supersedeFact(existing.id, { subject, predicate, object })
-    } else {
-      this.deps.store.insertFact({ subject, predicate, object })
-    }
-  }
-
-  private routeCommitment(content: string): void {
-    const segments = content.split(' | ')
-    let text = content.trim()
-    let dueAt: string | null = null
-    if (segments.length > 1) {
-      const maybe = segments.at(-1)?.trim() ?? ''
-      const parsed = Date.parse(maybe)
-      if (maybe && !Number.isNaN(parsed)) {
-        dueAt = new Date(parsed).toISOString()
-        text = segments.slice(0, -1).join(' | ').trim()
-      }
-    }
-    if (!text) return
-    this.deps.store.addCommitment({ content: text, dueAt })
   }
 }
