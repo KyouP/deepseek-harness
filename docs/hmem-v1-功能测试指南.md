@@ -222,8 +222,10 @@ node -e "const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('F
 重启 dsh，等 5 分钟内一轮 tick，然后直查验证：
 
 1. **便签蒸馏**：若 scratchpad 里有 24h~7 天前的便签 → 被提炼进 cards，旧便签删除
-2. **衰减结算**：`SELECT summary, salience, archived FROM cards WHERE pinned=0;` 非 pinned 卡 salience 按 `exp(-0.02·天数)` 下降
-3. **归档加速**：把某张卡的 `recorded_at` 改到 60 天前（`UPDATE cards SET recorded_at='2026-06-01T00:00:00Z' WHERE id='...'`），再触发一次巩固 → salience 跌破 0.2，`archived=1`
+2. **衰减结算**：`SELECT summary, strength, archived FROM cards WHERE pinned=0;` 非 pinned 卡 **strength** 按 `exp(-0.02·天数)` 下降（衰减只动 strength；salience 永不变化）
+3. **归档加速**：strength 跌破 0.2 才归档。公式：N 天后 strength = 初值 · `exp(-0.02·N)`——初值 1 时需 ≥81 天（`exp(-0.02·81)≈0.198<0.2`；只改 60 天得 ≈0.30，不会归档）。把某张卡的 `recorded_at` 改到 81 天前（日期按运行日回推，如 `2026-06-02T00:00:00Z`），并清掉衰减水位让全额 Δt 生效：
+   `UPDATE cards SET recorded_at='2026-06-02T00:00:00Z' WHERE id='...'; DELETE FROM meta WHERE key='decay:last';`
+   再触发一次巩固 → 该卡 strength<0.2、`archived=1`（测试库内可接受：清水位会让所有非 pinned 卡从各自 recorded_at 全额结算）
 4. **复苏**：对该卡内容做 `memory_recall`（模型侧说「深度搜索一下…」引导 `deep=true`）→ 命中后 `archived` 回到 0
 
 **通过标准**：衰减只动非 pinned 卡；归档是 `archived=1` 而非删除；deep 命中即复苏。

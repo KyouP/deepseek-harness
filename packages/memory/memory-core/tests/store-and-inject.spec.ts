@@ -70,12 +70,14 @@ describe('memory_store / memory_note', () => {
 
   it('summarizes a long first line with an ellipsis and keeps multi-line content', async () => {
     const { ctx, fiber } = await setup()
-    const longLine = '长'.repeat(61)
+    // No single character may repeat ≥5 in a row — the FR-3.6 write gate
+    // rejects CJK stutter, so the long line alternates two characters.
+    const longLine = '长短'.repeat(31)
     const result = await call(ctx, 'memory_store', { content: `${longLine}\n第二行` })
     expect(result.isError).toBe(false)
     if (result.isError) throw new Error('unexpected')
     const card = ctx.memoryStore.store.getCard((result.value as { id: string }).id)!
-    expect(card.summary).toBe(`${'长'.repeat(60)}…`)
+    expect(card.summary).toBe(`${'长短'.repeat(30)}…`)
     expect(card.content).toContain('第二行')
     await fiber.dispose()
   })
@@ -97,6 +99,33 @@ describe('memory_store / memory_note', () => {
     expect(result.isError).toBe(false)
     const [commitment] = ctx.memoryStore.store.activeCommitments()
     expect(commitment!.dueAt).toBeNull()
+    await fiber.dispose()
+  })
+
+  it('rejects mojibake content at the write gate and stores nothing', async () => {
+    const { ctx, fiber } = await setup()
+    const result = await call(ctx, 'memory_store', { content: '锟斤拷 锟斤拷 乱码' })
+    expect(result.isError).toBe(false)
+    const value = result.value as { ok: boolean; error?: string }
+    expect(value.ok).toBe(false)
+    expect(value.error).toContain('write hygiene')
+    // The commitment arm is gated too: commitment text lands in the store.
+    const commitment = await call(ctx, 'memory_store', { content: '锟斤拷 锟斤拷', type: 'commitment' })
+    expect((commitment.value as { ok: boolean }).ok).toBe(false)
+    const cards = ctx.memoryStore.store.db
+      .prepare('SELECT COUNT(*) AS n FROM cards').get() as { n: number }
+    expect(cards.n).toBe(0)
+    expect(ctx.memoryStore.store.activeCommitments()).toHaveLength(0)
+    await fiber.dispose()
+  })
+
+  it('still stores clean content after the write gate (regression)', async () => {
+    const { ctx, fiber } = await setup()
+    const result = await call(ctx, 'memory_store', { content: '用户偏好简体中文回复' })
+    expect(result.isError).toBe(false)
+    const value = result.value as { ok: boolean; id: string }
+    expect(value.ok).toBe(true)
+    expect(ctx.memoryStore.store.getCard(value.id)).toBeTruthy()
     await fiber.dispose()
   })
 
