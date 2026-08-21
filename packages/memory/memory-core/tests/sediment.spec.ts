@@ -61,14 +61,23 @@ function longEvents(userText = '长'.repeat(200), assistantText = '答'.repeat(1
   ]
 }
 
-function makeAgent(events: { type: string; data: unknown; seq: number }[], header?: unknown): AgentLike {
-  return {
-    session: {
-      id: 's1',
-      events,
-      requestHeader: () => header as ReturnType<NonNullable<AgentLike['session']['requestHeader']>>,
-    },
+function makeAgent(
+  events: { type: string; data: unknown; seq: number }[],
+  foldedHeader?: unknown,
+  sessionHeader?: unknown,
+): AgentLike {
+  const session: AgentLike['session'] = {
+    id: 's1',
+    events,
+    requestHeader: () => foldedHeader as ReturnType<NonNullable<AgentLike['session']['requestHeader']>>,
   }
+  if (sessionHeader !== undefined) session.header = sessionHeader as NonNullable<AgentLike['session']['header']>
+  return { session }
+}
+
+/** Production folded header: an EpochHeader (config/system/tools) — no origin/parentSession/cwd. */
+function epochHeader() {
+  return { config: { provider: 'p', model: 'm' }, system: 'sys', tools: [] }
 }
 
 /** Local YYYY-MM-DD, mirroring the sedimenter's daily counter key. */
@@ -129,7 +138,17 @@ describe('Sedimenter gates', () => {
     expect(store!.recentCards(5)).toEqual([])
   })
 
-  it('skips subagent turns', async () => {
+  it('skips subagent turns detected via session.header (production SessionHeader shape)', async () => {
+    const llm = fakeLlm(['[CARD] 不该出现'])
+    const sed = setup(llm)
+    // Production shape: origin/parentSession live on session.header; the folded
+    // requestHeader() is an EpochHeader (config/system/tools) with neither field.
+    expect(await sed.runOnce(makeAgent(longEvents(), epochHeader(), { origin: 'subagent', cwd: 'F:/proj' }), 1)).toBe('skipped')
+    expect(await sed.runOnce(makeAgent(longEvents(), epochHeader(), { parentSession: 'parent-1' }), 2)).toBe('skipped')
+    expect(llm.calls).toBe(0)
+  })
+
+  it('still honors legacy doubles that carry origin on the folded requestHeader', async () => {
     const llm = fakeLlm(['[CARD] 不该出现'])
     const sed = setup(llm)
     expect(await sed.runOnce(makeAgent(longEvents(), { origin: 'subagent' }), 1)).toBe('skipped')

@@ -13,6 +13,7 @@
 
 import type { MemoryStore } from '@deepseek-ai/dsh-memory-store'
 import type { AgentLike } from './sediment.ts'
+import { isSubagentSession } from './workspace.ts'
 
 /** The slice of the plugin Config the periodic review reads. */
 export interface ReviewConfig {
@@ -37,16 +38,14 @@ export const REVIEW_PROMPT = [
 
 /**
  * Subagent gate, identical to the sediment one: a turn counts only when its
- * session is neither `origin: 'subagent'` nor carrying a `parentSession`. A
- * missing/broken header accessor fails open (counts as top-level).
+ * session is neither `origin: 'subagent'` nor carrying a `parentSession`.
+ * Both markers live on `session.header` (SessionHeader); the folded
+ * `requestHeader()` (EpochHeader: config/system/tools) carries neither and is
+ * read only as a legacy-double fallback. A missing/broken header accessor
+ * fails open (counts as top-level).
  */
 export function isSubagentAgent(agent: AgentLike | undefined): boolean {
-  try {
-    const header = agent?.session?.requestHeader?.()
-    return header?.origin === 'subagent' || header?.parentSession != null
-  } catch {
-    return false
-  }
+  return isSubagentSession(agent?.session)
 }
 
 /**

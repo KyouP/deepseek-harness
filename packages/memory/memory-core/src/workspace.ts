@@ -42,3 +42,43 @@ export function sessionWorkspace(session: WorkspaceSessionLike | null | undefine
   }
   return null
 }
+
+/**
+ * Structural minimum of a session for subagent detection. Same provenance
+ * rule as {@link WorkspaceSessionLike}: the real DSH session API exposes
+ * `origin`/`parentSession` on the immutable storage metadata
+ * (`session.header`, SessionHeader); the folded `requestHeader()`
+ * (EpochHeader: config/system/tools) carries neither and is read only as a
+ * compatibility fallback for legacy AgentLike test doubles.
+ */
+export interface SubagentSessionLike {
+  /** Storage metadata; the canonical origin source (`Session.header`). */
+  header?: { origin?: unknown; parentSession?: unknown } | null
+  /**
+   * Legacy/mock fallback: some doubles carry origin/parentSession on the
+   * folded header. Typed `unknown` because the real EpochHeader has neither —
+   * the check narrows defensively.
+   */
+  requestHeader?(): unknown
+}
+
+/**
+ * Subagent gate shared by the sediment task and the periodic review: a turn
+ * is a subagent turn when its session header marks `origin: 'subagent'` or
+ * carries a `parentSession`. A missing/broken accessor fails open (counts as
+ * top-level), matching the original gate semantics.
+ */
+export function isSubagentSession(session: SubagentSessionLike | null | undefined): boolean {
+  try {
+    const header = session?.header
+    if (header && (header.origin === 'subagent' || header.parentSession != null)) return true
+    const folded: unknown = session?.requestHeader?.()
+    if (folded !== null && typeof folded === 'object') {
+      const legacy = folded as { origin?: unknown; parentSession?: unknown }
+      if (legacy.origin === 'subagent' || legacy.parentSession != null) return true
+    }
+  } catch {
+    // A broken accessor must never break the turn-stop path; fail open.
+  }
+  return false
+}

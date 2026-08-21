@@ -70,16 +70,28 @@ describe('TurnReview', () => {
 })
 
 describe('isSubagentAgent', () => {
-  it('detects subagents by origin or parentSession, matching the sediment gate', () => {
-    const subByOrigin = { session: { id: 'a', events: [], requestHeader: () => ({ origin: 'subagent' }) } }
-    const subByParent = { session: { id: 'b', events: [], requestHeader: () => ({ parentSession: 'p' }) } }
-    const topLevel = { session: { id: 'c', events: [], requestHeader: () => ({ origin: 'user' }) } }
+  it('detects subagents from session.header (production SessionHeader shape)', () => {
+    // Production: requestHeader() folds the EpochHeader (config/system/tools) —
+    // it carries neither origin nor parentSession; both live on session.header.
+    const epoch = { config: { provider: 'p', model: 'm' }, system: 'sys', tools: [] }
+    const subByOrigin = { session: { id: 'a', events: [], header: { origin: 'subagent' }, requestHeader: () => epoch } }
+    const subByParent = { session: { id: 'b', events: [], header: { parentSession: 'p' }, requestHeader: () => epoch } }
+    const topLevel = { session: { id: 'c', events: [], header: { cwd: '/x' }, requestHeader: () => epoch } }
     const noHeader = { session: { id: 'd', events: [] } }
     expect(isSubagentAgent(subByOrigin)).toBe(true)
     expect(isSubagentAgent(subByParent)).toBe(true)
     expect(isSubagentAgent(topLevel)).toBe(false)
     expect(isSubagentAgent(noHeader)).toBe(false)
     expect(isSubagentAgent(undefined)).toBe(false)
+  })
+
+  it('still honors legacy doubles that carry origin on the folded requestHeader', () => {
+    const subByOrigin = { session: { id: 'a', events: [], requestHeader: () => ({ origin: 'subagent' }) } }
+    const subByParent = { session: { id: 'b', events: [], requestHeader: () => ({ parentSession: 'p' }) } }
+    const topLevel = { session: { id: 'c', events: [], requestHeader: () => ({ origin: 'user' }) } }
+    expect(isSubagentAgent(subByOrigin)).toBe(true)
+    expect(isSubagentAgent(subByParent)).toBe(true)
+    expect(isSubagentAgent(topLevel)).toBe(false)
   })
 })
 

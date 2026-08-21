@@ -16,7 +16,7 @@ import { embedCard } from './embed.ts'
 import { autoLink } from './links.ts'
 import { cardNovelty, cardRepeat, salienceScore, salienceTier } from './salience.ts'
 import { sanitizeForWrite } from './sanitize.ts'
-import { sessionWorkspace } from './workspace.ts'
+import { isSubagentSession, sessionWorkspace } from './workspace.ts'
 
 export interface SedimentConfig {
   sedimentEnabled?: boolean
@@ -38,9 +38,17 @@ export interface AgentLike {
   session: {
     id: unknown
     events: SessionEventLike[]
-    /** 存储元数据（Session.header）：cwd 的真实来源（FR-2.9 打标）。 */
-    header?: { cwd?: unknown } | null
-    requestHeader?(): { origin?: string; parentSession?: unknown; cwd?: string } | undefined
+    /**
+     * 存储元数据（Session.header）：cwd / origin / parentSession 的真实来源
+     * （FR-2.9 打标、子代理门控）。
+     */
+    header?: { cwd?: unknown; origin?: unknown; parentSession?: unknown } | null
+    /**
+     * Legacy/mock fallback only: the real `requestHeader()` folds the
+     * EpochHeader (config/system/tools) — it carries NO origin, parentSession,
+     * or cwd. Typed `unknown`; consumers narrow defensively.
+     */
+    requestHeader?(): unknown
   }
 }
 
@@ -302,8 +310,9 @@ export class Sedimenter {
     // The real dispatch may hand us a bare { turn, signal } payload without an
     // agent; every access below stays defensive against a malformed shape.
     const session = (agent as Partial<AgentLike> | null | undefined)?.session
-    const header = this.headerOf(session)
-    if (header && (header.origin === 'subagent' || header.parentSession != null)) return 'skipped'
+    // 子代理门控（NFR-1.5）：origin/parentSession 的真实来源是 session.header
+    // （SessionHeader）；requestHeader 折出的是 EpochHeader，仅作旧 double 回退。
+    if (isSubagentSession(session)) return 'skipped'
     if (this.running) return 'skipped'
     const events = session?.events
     const extracted = Array.isArray(events) ? extractLastTurn(events) : null
@@ -376,15 +385,6 @@ export class Sedimenter {
   /** Number of failed turns currently waiting for a retry. */
   get pendingCount(): number {
     return this.pending.length
-  }
-
-  private headerOf(session: AgentLike['session'] | undefined): { origin?: string; parentSession?: unknown; cwd?: string } | undefined {
-    try {
-      return session?.requestHeader?.()
-    } catch {
-      // A broken header accessor must not crash the turn-stop path; fail open.
-      return undefined
-    }
   }
 
   private enqueue(entry: PendingEntry): void {
