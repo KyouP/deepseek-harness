@@ -200,8 +200,11 @@ describe('rankedRecall vector channel', () => {
 describe('sediment routing embed trigger', () => {
   it('routeSedimentItem embeds a routed card detached when deps carry an embedder', async () => {
     const embedder: Embedder = { embed: async () => [[0, 1, 0]] }
+    // emo 1.0 + 同内容 suggestion hits=2 → s≈0.733 ≥ 0.7 → store 档（Task 16 门控）
+    store.addSuggestion({ kind: 'card', content: '主人喜欢喝手冲咖啡' })
+    store.addSuggestion({ kind: 'card', content: '主人喜欢喝手冲咖啡' })
     const ok = routeSedimentItem(
-      { kind: 'card', content: '主人喜欢喝手冲咖啡' },
+      { kind: 'card', content: '主人喜欢喝手冲咖啡', emotion: 1 },
       { store, logger: noopLogger, embedder },
     )
     expect(ok).toBe(true)

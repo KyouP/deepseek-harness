@@ -13,6 +13,7 @@
 import type { MemoryStore } from '@deepseek-ai/dsh-memory-store'
 import type { Embedder, LlmBackend } from './llm.ts'
 import { embedCard } from './embed.ts'
+import { cardNovelty, cardRepeat, salienceScore, salienceTier } from './salience.ts'
 import { sanitizeForWrite } from './sanitize.ts'
 
 export interface SedimentConfig {
@@ -53,6 +54,8 @@ export type SedimentResult = 'stored' | 'empty' | 'skipped' | 'failed'
 export interface SedimentItem {
   kind: 'card' | 'fact' | 'commitment' | 'user'
   content: string
+  /** 情绪强度 0..1（仅 CARD 行的 [emo:x] 标记）；缺省时路由按 0.5。 */
+  emotion?: number
 }
 
 /** 重试队列条目：存提取后的文本快照而非 agent 引用（agent 可能已销毁）。 */
@@ -69,19 +72,31 @@ const SYSTEM = '你是记忆提炼器。从一轮对话中提炼值得长期保�
 const MAX_RETRIES = 5
 const TAIL_BUDGET = 900
 const MARKER_RE = /^\[(CARD|FACT|COMMITMENT|USER)\]\s*(.*)$/
+const EMO_RE = /^\[emo:([0-9]*\.?[0-9]+)\]\s*/i
 
 /**
  * Parse the distiller's marked output into routable items. Lines without a
  * recognized marker (including the explicit （无） empty marker) are noise.
+ * CARD lines may carry a leading [emo:0.0-1.0] marker (Task 16); it is
+ * stripped into `emotion`, and old un-marked output stays valid (tolerance).
  */
 export function parseSedimentOutput(text: string): SedimentItem[] {
   const items: SedimentItem[] = []
   for (const raw of text.split('\n')) {
     const match = MARKER_RE.exec(raw.trim())
     if (!match) continue
-    const content = match[2]?.trim() ?? ''
+    const kind = (match[1] ?? '').toLowerCase() as SedimentItem['kind']
+    let content = match[2]?.trim() ?? ''
+    let emotion: number | undefined
+    if (kind === 'card') {
+      const emo = EMO_RE.exec(content)
+      if (emo) {
+        emotion = Number.parseFloat(emo[1] ?? '')
+        content = content.slice(emo[0].length).trim()
+      }
+    }
     if (!content) continue
-    items.push({ kind: (match[1] ?? '').toLowerCase() as SedimentItem['kind'], content })
+    items.push(emotion === undefined ? { kind, content } : { kind, content, emotion })
   }
   return items
 }
@@ -114,7 +129,7 @@ export function routeSedimentItem(
   try {
     switch (item.kind) {
       case 'card':
-        return routeCard(item.content, deps, provenance)
+        return routeCard(item, deps, provenance)
       case 'fact':
         return routeFact(item.content, deps)
       case 'commitment':
@@ -130,17 +145,38 @@ export function routeSedimentItem(
   }
 }
 
-function routeCard(content: string, deps: SedimentRouteDeps, provenance: SedimentProvenance): boolean {
-  const verdict = sanitizeForWrite(content)
+/**
+ * CARD 分流（FR-3.1/3.2 三档门控）：先过 sanitize 写闸，再按显著性公式
+ * 打分分档——drop 丢弃、scratchpad 落便签（explicit=0 的沉淀卡常态）、
+ * store 才插卡（salience=s，strength=1+0.5·s）并 detached embed。
+ */
+function routeCard(item: SedimentItem, deps: SedimentRouteDeps, provenance: SedimentProvenance): boolean {
+  const verdict = sanitizeForWrite(item.content)
   if (!verdict.ok) {
     deps.logger.warn(`memory-core: rejected sediment card (${verdict.reason})`)
     return false
+  }
+  const score = salienceScore({
+    emotion: item.emotion ?? 0.5,
+    novelty: cardNovelty(deps.store, verdict.text),
+    repeat: cardRepeat(deps.store, verdict.text),
+    explicit: 0, // 沉淀提取恒 0；memory_store 直写路径才是 explicit=1
+  })
+  const tier = salienceTier(score)
+  if (tier === 'drop') {
+    deps.logger.warn(`memory-core: dropped low-salience sediment card (s=${score.toFixed(2)}): ${verdict.text.slice(0, 30)}`)
+    return false
+  }
+  if (tier === 'scratchpad') {
+    deps.store.addNote(provenance.sessionId ?? null, verdict.text)
+    return true
   }
   const firstLine = verdict.text.split('\n', 1)[0] ?? ''
   const card = deps.store.insertCard({
     summary: firstLine.slice(0, 60),
     content: verdict.text,
-    salience: 0.5,
+    salience: score,
+    strength: 1 + 0.5 * score,
     pinned: false,
     sessionId: provenance.sessionId ?? null,
     workspace: provenance.workspace ?? null,
@@ -382,7 +418,7 @@ export class Sedimenter {
       `【你回答】${assistant.slice(0, 3000)}`,
       `【已有记忆尾部，避免重复】${this.memoryTail()}`,
       '输出格式（每行一条）：',
-      '[CARD] 事件/偏好/状态，一句自包含的话',
+      '[CARD][emo:0.0-1.0] 事件/偏好/状态，一句自包含的话（emo 为情绪强度，越强烈越高）',
       '[FACT] 主体 | 属性 | 值（稳定事实，如 主人 | 职业 | 工程师）',
       '[COMMITMENT] 你在本轮亲口许下的待办 | ISO期限（没提期限可省略竖线后段）',
       '[USER] 用户画像增量（性格/偏好/背景）',

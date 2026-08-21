@@ -77,9 +77,12 @@ function backdateCard(id: string, ageMs: number): void {
 
 describe('Consolidator', () => {
   it('distills old notes into cards then deletes them', async () => {
-    const llm = fakeLlm(['[CARD] 主人怕吵'])
+    // emo 1.0 + 同内容 suggestion hits=2 → s≈0.733 ≥ 0.7 → store 档（Task 16 门控）
+    const llm = fakeLlm(['[CARD][emo:1.0] 主人怕吵'])
     const retryPending = vi.fn(async () => {})
     const consolidator = setup(llm, CONFIG, { retryPending })
+    store!.addSuggestion({ kind: 'card', content: '主人怕吵' })
+    store!.addSuggestion({ kind: 'card', content: '主人怕吵' })
     addNoteBackdated('便签一：楼下装修很吵', 2 * DAY_MS)
     addNoteBackdated('便签二：主人抱怨噪音', 2 * DAY_MS)
     addNoteBackdated('便签三：想买耳塞', 2 * DAY_MS)
