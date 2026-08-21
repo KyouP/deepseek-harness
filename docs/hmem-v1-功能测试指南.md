@@ -1,5 +1,7 @@
 # H-MEM 手动功能测试指南（v1 + v2）
 
+> **导引**：本文是**分阶段 walkthrough**——按阶段编排的边聊边观察操作剧本，适合第一遍顺着手动过一遍。若要**全量逐项核对**（15 个工具逐一、全部自动机制、降级路径、加速技巧与 SQL 验证方法），见 master 清单 `docs/hmem-功能测试清单与方案.md`；两份文档互补，清单项会回引本文的阶段号。
+
 > 适用版本：`worktree-hmem-v1` 分支（v2 已合入，tag `hmem-v2.0.0`）
 > 测试对象：已安装到 `F:\dsh_workspace\.dsh-home` 的 web / tui 两个 profile 的记忆插件
 > 测试方式：与 dsh 中的模型**用自然语言对话**，模型会自动调用记忆工具；你只需观察行为是否符合预期
@@ -111,7 +113,7 @@ pnpm dsh --profile web    # 或：pnpm dsh --profile tui
 
 正常方式：等到期时间过后再开一轮对话，上下文里该承诺应被置顶并带「【到期，请主动提起】」标记，模型会主动提及。
 
-**加速验证（推荐）**：退出 dsh，用附录 A 的方法把该承诺的 `due` 改成过去的时间，重启 dsh，开新会话直接观察模型是否主动提起。
+**加速验证（推荐）**：退出 dsh，用附录 A 的方法把该承诺的 `due_at` 改成过去的时间，重启 dsh，开新会话直接观察模型是否主动提起。
 
 **通过标准**：到期承诺被模型主动提起，而非等你问。
 
@@ -320,15 +322,15 @@ node -e "const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('F
 ```sql
 SELECT id, summary, pinned FROM cards;              -- 所有记忆卡片
 SELECT subject, predicate, object, valid_to FROM facts;  -- 事实（含已被取代的）
-SELECT id, content, due, closed_at FROM commitments;     -- 承诺表
-SELECT name, revision, content FROM core_blocks;         -- 人格/画像块
+SELECT id, content, due_at, status, closed_at FROM commitments;  -- 承诺表
+SELECT name, revision, text FROM core_blocks;                -- 人格/画像块
 SELECT created_at, text FROM scratchpad ORDER BY created_at DESC;  -- 便签
 ```
 
-**加速到期测试**：把承诺的 `due` 改为过去时间——
+**加速到期测试**：把承诺的 `due_at` 改为过去时间——
 
 ```powershell
-node -e "const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('F:/dsh_workspace/.dsh-home/storages/hmem.db');db.prepare(\"UPDATE commitments SET due='2020-01-01T00:00:00Z' WHERE closed_at IS NULL\").run()"
+node -e "const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('F:/dsh_workspace/.dsh-home/storages/hmem.db');db.prepare(\"UPDATE commitments SET due_at='2020-01-01T00:00:00Z' WHERE status='active'\").run()"
 ```
 
 ## 附录 B：常见问题

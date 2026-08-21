@@ -178,8 +178,8 @@ ollama pull bge-m3       # 可选：向量召回通道（embedEnabled=true 时�
 | `reviewEnabled` | `true` | 周期审查开关 |
 | `reviewIntervalTurns` | `5` | 多少顶层回合触发一次审查 |
 | `consolidateIdleMinutes` | `30` | 静默多久后允许睡眠巩固 |
-| `decayLambdaPerDay` | `0.02` | 显著性日衰减系数 λ |
-| `decayArchiveBelow` | `0.2` | 显著性低于此值归档 |
+| `decayLambdaPerDay` | `0.02` | 卡片**强度**（strength）日衰减系数 λ |
+| `decayArchiveBelow` | `0.2` | strength 低于此值归档（只动 strength；salience 永不衰减） |
 | `embedEnabled` | `false` | 向量召回通道开关（需 `ollama pull bge-m3`） |
 | `embedModel` | `'bge-m3'` | embedding 模型（复用 ollamaHost / llmTimeoutMs） |
 | `confirmQueue` | `false` | 记忆写入先入确认队列再转正 |
@@ -195,6 +195,13 @@ ollama pull bge-m3       # 可选：向量召回通道（embedEnabled=true 时�
 | 数据库损坏/打不开 | dsh **正常启动**，只是没有记忆功能，日志一条 warning |
 | 运行中数据库故障 | 记忆注入静默跳过，对话不受影响 |
 | 记忆内容携带注入指令 | 写入闸门拒写（FR-3.6）；注入闸门剥离危险行/段（FR-3.7）——双关口 |
+
+## 功能测试
+
+装完后想系统验证功能，用主仓的两份测试文档（本 README 会同步到独立仓，以下为主仓 `deepseek-harness` 仓库内 `docs/` 的相对路径）：
+
+- `docs/hmem-功能测试清单与方案.md` —— 全量 master 清单：15 个工具逐一 + 全部自动机制 + 降级路径，含加速技巧与 SQL 验证方法
+- `docs/hmem-v1-功能测试指南.md` —— 分阶段 walkthrough：边聊边观察的操作剧本（v1 阶段 1-7 + v2 阶段 8-15）
 
 ## 数据在哪、怎么管
 
