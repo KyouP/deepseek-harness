@@ -10,6 +10,8 @@
 //      LLM 不可用（null/throw）则整条跳过，便签原样保留，下轮再试；
 //   ② 冲突消解——程序化扫描 activeFacts：同 subject+predicate 且取值冲突的
 //      多行保留 recorded_at 最新者，其余 supersedeFact 链到最新内容；
+//   ③ 链接演化——recentCards(20) 逐张对索引复用 autoLink 补链（关键词共现
+//      ≥2 建链，weight=共现数）；失败置零，不拖垮整轮；
 //   ④ human block 重编译——存在 approved 的 kind=user 建议 → LLM 合并进当前
 //      human block → sanitizeForWrite 过闸 → setCoreBlock('human', …) →
 //      建议置 rejected（已消费）；LLM 不可用则跳过不丢。
@@ -29,6 +31,7 @@
 import type { Fact, MemoryStore, NewFact, Note, Suggestion } from '@deepseek-ai/dsh-memory-store'
 import type { Embedder, LlmBackend } from './llm.ts'
 import { parseSedimentOutput, routeSedimentItem } from './sediment.ts'
+import { autoLink } from './links.ts'
 import { sanitizeForWrite } from './sanitize.ts'
 
 export interface ConsolidateConfig {
@@ -64,6 +67,8 @@ export interface ConsolidateDeps {
 export interface ConsolidateReport {
   distilled: number
   superseded: number
+  /** ③ 本轮链接演化新建的链接数。 */
+  linked: number
   recompiled: boolean
   decayed: number
   archived: number
@@ -71,7 +76,7 @@ export interface ConsolidateReport {
   embedded: number
 }
 
-const EMPTY_REPORT: ConsolidateReport = { distilled: 0, superseded: 0, recompiled: false, decayed: 0, archived: 0, embedded: 0 }
+const EMPTY_REPORT: ConsolidateReport = { distilled: 0, superseded: 0, linked: 0, recompiled: false, decayed: 0, archived: 0, embedded: 0 }
 
 const DAY_MS = 24 * 3600_000
 const DISTILL_WINDOW_DAYS = 7
@@ -126,10 +131,11 @@ export class Consolidator {
       }
       const distilled = await this.distillNotes(now)
       const superseded = this.resolveFactConflicts()
+      const linked = this.evolveLinks()
       const recompiled = await this.recompileHumanBlock()
       const decay = this.settleDecay(now)
       const embedded = await this.backfillEmbeddings()
-      return { distilled, superseded, recompiled, decayed: decay.decayed, archived: decay.archived, embedded }
+      return { distilled, superseded, linked, recompiled, decayed: decay.decayed, archived: decay.archived, embedded }
     } finally {
       this.running = false
     }
@@ -265,6 +271,30 @@ export class Consolidator {
       }
     }
     return superseded
+  }
+
+  /**
+   * ③ 链接演化（FR-8.2）：recentCards(20) 逐张对索引复用 autoLink 补链——
+   * 每张卡按 summary+content 抽关键词做共现检索，共现 ≥2 的邻居建链
+   * （weight=共现数）。autoLink 自身逐词/逐链失败容忍；recentCards 失败
+   * 置零，绝不 throw、不拖垮整轮。
+   */
+  private evolveLinks(): number {
+    let cards: ReturnType<MemoryStore['recentCards']>
+    try {
+      cards = this.deps.store.recentCards(20)
+    } catch {
+      return 0
+    }
+    let linked = 0
+    for (const card of cards) {
+      try {
+        linked += autoLink(this.deps.store, card.id, `${card.summary}\n${card.content}`)
+      } catch (error) {
+        this.deps.logger.warn(`memory-core: link evolution failed for ${card.id}: ${String(error)}`)
+      }
+    }
+    return linked
   }
 
   /** ④ human block 重编译；LLM 不可用 / 过闸失败都跳过不丢（建议保留）。 */

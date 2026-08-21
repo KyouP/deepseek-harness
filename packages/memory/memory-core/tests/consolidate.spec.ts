@@ -152,7 +152,7 @@ describe('Consolidator', () => {
 
     const report = await consolidator.run()
 
-    expect(report).toEqual({ distilled: 0, superseded: 0, recompiled: false, decayed: 0, archived: 0, embedded: 0 })
+    expect(report).toEqual({ distilled: 0, superseded: 0, linked: 0, recompiled: false, decayed: 0, archived: 0, embedded: 0 })
     // 便签保留、建议保留（下轮再试）
     expect(store!.notesBetween(weekAgoIso(), dayAgoIso())).toHaveLength(1)
     expect(store!.listSuggestions('approved')).toHaveLength(1)

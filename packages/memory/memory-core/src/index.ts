@@ -279,3 +279,4 @@ export type { ConsolidateConfig, ConsolidateDeps, ConsolidateLogger, Consolidate
 export { registerReviewTools } from './tools-review.ts'
 export { browseSessions, DEFAULT_BROWSE_LIMIT, parseSessionJsonl } from './browse.ts'
 export type { BrowseSessionsOptions, BrowseSessionsResult, ParsedSession, SessionMessage } from './browse.ts'
+export { autoLink, CJK_STOP_CHARS, extractKeywords, LATIN_STOP_WORDS } from './links.ts'

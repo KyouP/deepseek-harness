@@ -13,6 +13,7 @@
 import type { MemoryStore } from '@deepseek-ai/dsh-memory-store'
 import type { Embedder, LlmBackend } from './llm.ts'
 import { embedCard } from './embed.ts'
+import { autoLink } from './links.ts'
 import { cardNovelty, cardRepeat, salienceScore, salienceTier } from './salience.ts'
 import { sanitizeForWrite } from './sanitize.ts'
 
@@ -183,6 +184,8 @@ function routeCard(item: SedimentItem, deps: SedimentRouteDeps, provenance: Sedi
   })
   // FR-4.1 写侧向量：detached，失败静默，由巩固任务 ⑦ 回填兜底。
   embedCard(deps.store, deps.embedder, card)
+  // FR-2.4 入库后自动建链：本地关键词共现，逐词/逐链失败容忍，绝不打断写路径。
+  autoLink(deps.store, card.id, verdict.text)
   return true
 }
 

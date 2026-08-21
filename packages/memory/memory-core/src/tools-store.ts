@@ -10,6 +10,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { MemoryStoreService } from './service.ts'
 import type { Embedder } from './llm.ts'
 import { embedCard } from './embed.ts'
+import { autoLink } from './links.ts'
 
 /** One-line summary derivation for explicitly stored memories: first line, capped. */
 function summarize(content: string): string {
@@ -66,6 +67,8 @@ export function registerStoreTools(ctx: Context, service: MemoryStoreService, em
       })
       // FR-4.1 写侧向量：detached，失败静默（NFR-2.2），巩固任务 ⑦ 回填。
       embedCard(service.store, embedder, card)
+      // FR-2.4 入库后自动建链：本地关键词共现，失败容忍，绝不打断写路径。
+      autoLink(service.store, card.id, args.content)
       return Promise.resolve({ id: card.id, kind: 'card' as const })
     },
     presentCall: args => ({ card: 'generic', title: 'Store memory', kind: 'other', rawInput: args }),
