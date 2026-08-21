@@ -18,6 +18,7 @@ import type { Suggestion } from '@deepseek-ai/dsh-memory-store'
 import { embedCard } from './embed.ts'
 import { autoLink } from './links.ts'
 import { sanitizeForWrite } from './sanitize.ts'
+import { sessionWorkspace } from './workspace.ts'
 
 /** Same first-line derivation memory_store uses for explicitly stored cards. */
 function summarize(content: string): string {
@@ -125,7 +126,7 @@ export function registerSuggestionTools(
         return [{ type: 'text', text: `Approved suggestion ${value.id} → landed as ${value.landedKind} ${value.landedId}.` }]
       },
     },
-    execute(args): Promise<SuggestionsResult> {
+    execute(args, exec): Promise<SuggestionsResult> {
       const action = args.action as SuggestionsResult['action']
       if (action === 'list') {
         const suggestions = service.store.listSuggestions('pending').slice(0, 20)
@@ -163,6 +164,8 @@ export function registerSuggestionTools(
               pinned: true,
               salience: 1,
               sessionId: null,
+              // FR-2.9 打标：批准落库的卡同样属于当前工作区；cwd 未知 → null。
+              workspace: sessionWorkspace(exec.agent?.session),
             })
             // Detached embedding (FR-4.1) + auto-linking (FR-2.4), both
             // failure-tolerant, identical to the memory_store explicit path.

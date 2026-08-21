@@ -183,7 +183,7 @@ export function apply(ctx: Context, config: Config): void {
     // "无向量通道"降级（NFR-2.2）——召回结果与关闭时一致，写侧跳过 embed。
     const embedder = createEmbedder(config)
     registerStoreTools(scope, scope.memoryStore, embedder)
-    registerRecallTools(scope, scope.memoryStore, embedder)
+    registerRecallTools(scope, scope.memoryStore, embedder, config)
     registerCommitmentTools(scope, scope.memoryStore)
     registerBrowseTool(scope, scope.memoryStore)
     mountInjections(scope, scope.memoryStore, {
@@ -290,3 +290,5 @@ export { registerExportTools } from './tools-export.ts'
 export { browseSessions, DEFAULT_BROWSE_LIMIT, parseSessionJsonl } from './browse.ts'
 export type { BrowseSessionsOptions, BrowseSessionsResult, ParsedSession, SessionMessage } from './browse.ts'
 export { autoLink, CJK_STOP_CHARS, extractKeywords, LATIN_STOP_WORDS } from './links.ts'
+export { sessionWorkspace } from './workspace.ts'
+export type { WorkspaceSessionLike } from './workspace.ts'

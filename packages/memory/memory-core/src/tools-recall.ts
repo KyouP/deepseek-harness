@@ -10,6 +10,13 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { MemoryStoreService } from './service.ts'
 import type { Embedder } from './llm.ts'
 import { rankedRecall } from './recall.ts'
+import { sessionWorkspace } from './workspace.ts'
+
+/** The slice of the plugin Config the recall tools read. */
+export interface RecallToolsConfig {
+  /** FR-2.9: boost same-workspace cards during recall (default false). */
+  workspaceScope?: boolean
+}
 
 /**
  * Embed the recall query once (FR-4.1 热路径单次调用); any failure degrades
@@ -30,8 +37,15 @@ async function embedQuery(embedder: Embedder | null | undefined, query: string):
  * @param service - the memory store service.
  * @param embedder - optional vector backend; memory_recall embeds the query
  *   once per call (failure degrades to bm25-only, never throws).
+ * @param config - plugin configuration slice; workspaceScope gates the
+ *   same-workspace recall boost (FR-2.9, default off).
  */
-export function registerRecallTools(ctx: Context, service: MemoryStoreService, embedder?: Embedder | null): void {
+export function registerRecallTools(
+  ctx: Context,
+  service: MemoryStoreService,
+  embedder?: Embedder | null,
+  config?: RecallToolsConfig,
+): void {
   ctx.tools.register(defineTool({
     name: 'memory_recall',
     description: 'Search your long-term memory. Returns one-line summaries; call '
@@ -72,12 +86,16 @@ export function registerRecallTools(ctx: Context, service: MemoryStoreService, e
           ).join('\n'),
       }],
     },
-    async execute(args) {
+    async execute(args, exec) {
       const queryVector = await embedQuery(embedder, args.query)
       const hits = rankedRecall(service.store, args.query, {
         limit: args.limit ?? 10,
         deep: args.deep ?? false,
         queryVector,
+        // FR-2.9：scope 开且 cwd 已知时同工作区卡 +0.1；cwd 未知（null）时
+        // 与关闭完全一致（保守退化，绝不藏记忆）。
+        workspaceScope: config?.workspaceScope ?? false,
+        workspace: sessionWorkspace(exec.agent?.session),
       })
       return {
         results: hits.map(h => ({ id: h.id, summary: h.summary, kind: h.kind, uncertain: h.uncertain })),

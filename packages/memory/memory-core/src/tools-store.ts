@@ -11,6 +11,7 @@ import type { MemoryStoreService } from './service.ts'
 import type { Embedder } from './llm.ts'
 import { embedCard } from './embed.ts'
 import { autoLink } from './links.ts'
+import { sessionWorkspace } from './workspace.ts'
 
 /** One-line summary derivation for explicitly stored memories: first line, capped. */
 function summarize(content: string): string {
@@ -64,6 +65,8 @@ export function registerStoreTools(ctx: Context, service: MemoryStoreService, em
         pinned: args.pinned ?? true,
         salience: 1,
         sessionId: exec.agent ? String(exec.agent.session.id) : null,
+        // FR-2.9 打标：仅 cards 打 workspace；cwd 未知时 null（全局卡，不罚分）。
+        workspace: sessionWorkspace(exec.agent?.session),
       })
       // FR-4.1 写侧向量：detached，失败静默（NFR-2.2），巩固任务 ⑦ 回填。
       embedCard(service.store, embedder, card)

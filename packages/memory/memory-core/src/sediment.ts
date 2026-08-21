@@ -16,6 +16,7 @@ import { embedCard } from './embed.ts'
 import { autoLink } from './links.ts'
 import { cardNovelty, cardRepeat, salienceScore, salienceTier } from './salience.ts'
 import { sanitizeForWrite } from './sanitize.ts'
+import { sessionWorkspace } from './workspace.ts'
 
 export interface SedimentConfig {
   sedimentEnabled?: boolean
@@ -37,6 +38,8 @@ export interface AgentLike {
   session: {
     id: unknown
     events: SessionEventLike[]
+    /** 存储元数据（Session.header）：cwd 的真实来源（FR-2.9 打标）。 */
+    header?: { cwd?: unknown } | null
     requestHeader?(): { origin?: string; parentSession?: unknown; cwd?: string } | undefined
   }
 }
@@ -343,7 +346,10 @@ export class Sedimenter {
         assistant: extracted.assistant,
         turn,
         sessionId,
-        workspace: header?.cwd ?? null,
+        // FR-2.9 打标：cwd 的真实来源是 session.header（SessionHeader）；
+        // requestHeader 折出的是 EpochHeader（config/system/tools），不含
+        // cwd，仅作旧结构/测试 double 的回退。未知 cwd → null（全局卡）。
+        workspace: sessionWorkspace(session),
       })
     } catch (error) {
       this.deps.logger.warn(`memory-core: sedimentation failed: ${String(error)}`)

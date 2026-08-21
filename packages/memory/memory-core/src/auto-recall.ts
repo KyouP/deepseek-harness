@@ -17,6 +17,7 @@ import { truncateChars } from './budget.ts'
 import { sanitizeForInjection } from './sanitize.ts'
 import { rankedRecall, type RankedHit } from './recall.ts'
 import type { Embedder } from './llm.ts'
+import { sessionWorkspace, type WorkspaceSessionLike } from './workspace.ts'
 
 /** Block header; names memory_expand so the model can pull the full text. */
 export const RECALL_BLOCK_HEADER = '【可能相关的记忆（memory_expand 看全文）】'
@@ -37,6 +38,8 @@ export interface AutoRecallConfig {
   recallBudgetChars?: number
   /** Minimum relevance score forwarded to {@link rankedRecall}. */
   recallRelevanceFloor?: number
+  /** FR-2.9: boost same-workspace cards when the session cwd is known. */
+  workspaceScope?: boolean
 }
 
 /** Minimal warn sink; defaults to silent so the class is usable stand-alone. */
@@ -83,6 +86,9 @@ export class AutoRecall {
   private readonly enabled: boolean
   private readonly budgetChars: number
   private readonly floor: number
+  private readonly scope: boolean
+  /** FR-2.9: the active session's cwd, refreshed on every pre-step; null = unknown. */
+  private workspace: string | null = null
   private lastQuery: string | null = null
   private lastBlock = ''
 
@@ -95,6 +101,7 @@ export class AutoRecall {
     this.enabled = config.recallAutoInject ?? true
     this.budgetChars = config.recallBudgetChars ?? DEFAULT_BUDGET_CHARS
     this.floor = config.recallRelevanceFloor ?? DEFAULT_FLOOR
+    this.scope = config.workspaceScope ?? false
   }
 
   /**
@@ -108,9 +115,16 @@ export class AutoRecall {
    * render of a changed query is bm25-only; once the query vector lands and
    * the query is still current, the block is re-rendered with the vector
    * channel. Embed failure degrades silently to the bm25-only block (NFR-2.2).
+   *
+   * @param workspace - the stepping session's cwd (FR-2.9); null when unknown,
+   *   which degrades scoped recall to the scope-off behavior.
    */
-  onPreStep(messages: { content: unknown }[]): void {
+  onPreStep(messages: { content: unknown }[], workspace: string | null = null): void {
     if (!this.enabled) return
+    // Refresh the workspace even when the text gate skips the query: the
+    // detached vector re-render of a still-current query must score against
+    // the cwd of the session that is actually stepping.
+    this.workspace = workspace
     const text = textOf(messages.at(-1)?.content).trim()
     if (text.length < MIN_QUERY_CHARS || text === this.lastQuery) return
     // Cache the query even when the recall fails: an unchanged text must not
@@ -124,7 +138,14 @@ export class AutoRecall {
   private refresh(text: string, queryVector: number[] | null = null): void {
     let hits: RankedHit[]
     try {
-      hits = rankedRecall(this.store, text, { limit: AUTO_RECALL_LIMIT, floor: this.floor, queryVector })
+      hits = rankedRecall(this.store, text, {
+        limit: AUTO_RECALL_LIMIT,
+        floor: this.floor,
+        queryVector,
+        // FR-2.9：scope 开且 cwd 已知时同工作区卡 +0.1；cwd null 与关闭一致。
+        workspaceScope: this.scope,
+        workspace: this.workspace,
+      })
     } catch (error) {
       this.lastBlock = ''
       this.logger.warn(`memory-core: auto recall failed: ${String(error)}`)
@@ -171,14 +192,19 @@ export function mountAutoRecall(ctx: Context, store: MemoryStore, config: AutoRe
   }, embedder)
   // This package does not depend on @deepseek-ai/dsh-agent, so the event is
   // not in the local Events augmentation (same pattern as the sediment hook).
+  // The dispatcher injects the subject `agent` into every payload (see
+  // agentEvents in dsh-agent), so the session cwd is available for FR-2.9.
   const events = ctx as unknown as {
-    on(event: 'agent/pre-step', listener: (payload: { messages?: { content: unknown }[] }, next: () => unknown) => unknown): void
+    on(event: 'agent/pre-step', listener: (
+      payload: { agent?: { session?: WorkspaceSessionLike | null }, messages?: { content: unknown }[] },
+      next: () => unknown,
+    ) => unknown): void
   }
   events.on('agent/pre-step', (payload, next) => {
     // Waterfall semantics: the return value must always be next()'s — a
     // recall fault must never veto or rewrite the step.
     try {
-      autoRecall.onPreStep(payload.messages ?? [])
+      autoRecall.onPreStep(payload.messages ?? [], sessionWorkspace(payload.agent?.session))
     } catch {
       // AutoRecall already swallows store faults; this guards everything else.
     }
