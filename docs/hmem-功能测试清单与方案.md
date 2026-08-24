@@ -21,6 +21,8 @@
 
 没有 sqlite3 CLI 时用 Node 内置 `node:sqlite`（Node 24；**退出 dsh 再查**，避免 WAL 锁争用）：
 
+> **GUI 工具兼容性（已实测，2026-08-24）**：hmem.db 的 8 张业务表是 SQLite **STRICT 表**（schema 有意为之的类型约束），需要 SQLite ≥ 3.37 才能打开。**Navicat 内置 SQLite 版本过低，打开会误报 "database disk image is malformed"——数据库本身没有损坏**（`PRAGMA integrity_check` = ok）。请勿用 Navicat 打开；推荐：① 本节的 `node:sqlite` 一行命令；② Python `sqlite3`（3.37+）；③ DB Browser for SQLite（新版）。另外数据库处于 WAL 模式，数据可能主要在 `hmem.db-wal` 里——复制备份时必须三件套（`hmem.db` + `-wal` + `-shm`）一起拷，单拷 `.db` 会丢数据。
+
 ```powershell
 node -e "const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('F:/dsh_workspace/.dsh-home/storages/hmem.db');console.log(db.prepare('SELECT id,summary,salience,strength,pinned,archived,workspace,recorded_at FROM cards ORDER BY recorded_at DESC').all())"
 ```
