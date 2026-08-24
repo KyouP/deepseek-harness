@@ -21,6 +21,18 @@
 
 没有 sqlite3 CLI 时用 Node 内置 `node:sqlite`（Node 24；**退出 dsh 再查**，避免 WAL 锁争用）：
 
+**推荐：用仓库自带的 Python 工具脚本** `scripts/hmem_db.py`（纯标准库，已对本库实测）——把本节的常用查询和加速技巧都封成了子命令：
+
+```powershell
+python scripts/hmem_db.py overview          # 文件/完整性/各表行数总览
+python scripts/hmem_db.py cards --limit 10  # 卡片（facts / commitments / notes / suggestions / meta / blocks 同理）
+python scripts/hmem_db.py search 睡眠相 --tri   # trigram CJK 搜索（<3 字用 like 子命令兜底）
+python scripts/hmem_db.py backdate <卡id> 81 && python scripts/hmem_db.py clear-decay-watermark   # 衰减加速
+python scripts/hmem_db.py set-activity 60   # 巩固加速（activity:last 回拨 60 分钟）
+python scripts/hmem_db.py backup D:\备份目录  # checkpoint 后单文件备份
+# 完整子命令清单：python scripts/hmem_db.py -h ；数据库路径：--db 或 $env:DSH_HOME
+```
+
 > **GUI 工具兼容性（已实测，2026-08-24）**：hmem.db 的 8 张业务表是 SQLite **STRICT 表**（schema 有意为之的类型约束），需要 SQLite ≥ 3.37 才能打开。**Navicat 内置 SQLite 版本过低，打开会误报 "database disk image is malformed"——数据库本身没有损坏**（`PRAGMA integrity_check` = ok）。请勿用 Navicat 打开；推荐：① 本节的 `node:sqlite` 一行命令；② Python `sqlite3`（3.37+）；③ DB Browser for SQLite（新版）。另外数据库处于 WAL 模式，数据可能主要在 `hmem.db-wal` 里——复制备份时必须三件套（`hmem.db` + `-wal` + `-shm`）一起拷，单拷 `.db` 会丢数据。
 
 ```powershell
