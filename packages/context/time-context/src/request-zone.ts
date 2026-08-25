@@ -66,14 +66,14 @@ export function deriveBrowserTimeZoneContext(
 export function renderBrowserTimeZoneContext(context: BrowserTimeZoneContext): string {
   switch (context.kind) {
     case 'resolved':
-      return `Browser time zone for this request: ${context.timeZone}. `
-        + 'Interpret otherwise-unqualified dates and times in this zone.'
+      return `本请求的浏览器时区：${context.timeZone}。`
+        + '未明确时区的日期时间按此时区解释。'
     case 'mixed':
-      return `Browser time zone for this request: mixed ${JSON.stringify(context.timeZones)}. `
-        + 'Ask the user to clarify otherwise-unqualified dates and times.'
+      return `本请求的浏览器时区：混合 ${JSON.stringify(context.timeZones)}。`
+        + '未明确时区的日期时间请向用户澄清。'
     case 'missing':
-      return 'Browser time zone for this request: unavailable. '
-        + 'Ask the user to clarify otherwise-unqualified dates and times.'
+      return '本请求的浏览器时区：不可用。'
+        + '未明确时区的日期时间请向用户澄清。'
     /* v8 ignore next 2 -- the closed BrowserTimeZoneContext union is exhausted above. */
     default:
       return assertNever(context, 'BrowserTimeZoneContext')

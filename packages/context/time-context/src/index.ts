@@ -47,10 +47,10 @@ function formatDuration(elapsedMs: number): string {
   const minutes = Math.floor(seconds / 60)
   seconds %= 60
   const parts: string[] = []
-  if (days > 0) parts.push(`${days}d`)
-  if (hours > 0) parts.push(`${hours}h`)
-  if (minutes > 0) parts.push(`${minutes}m`)
-  parts.push(`${seconds}s`)
+  if (days > 0) parts.push(`${days}天`)
+  if (hours > 0) parts.push(`${hours}小时`)
+  if (minutes > 0) parts.push(`${minutes}分`)
+  parts.push(`${seconds}秒`)
   return parts.join(' ')
 }
 
@@ -116,12 +116,12 @@ function renderText(
   timeZone: string,
   browserContext: BrowserTimeZoneContext,
 ): string {
-  const elapsed = previous === undefined ? 'unavailable' : formatDuration(now - previous)
-  const baseline = step === 1 ? 'model-visible message' : 'step context'
+  const elapsed = previous === undefined ? '不可用' : formatDuration(now - previous)
+  const baseline = step === 1 ? '模型可见消息' : '步骤上下文'
   const browserText = renderBrowserTimeZoneContext(browserContext)
-  return `Time sampled while preparing turn ${turn}, step ${step}: ${formatTimestamp(now, formatter, timeZone)}\n`
+  return `准备第 ${turn} 轮第 ${step} 步时采样的时间：${formatTimestamp(now, formatter, timeZone)}\n`
     + `${browserText}\n`
-    + `Elapsed since the preceding ${baseline}: ${elapsed}.`
+    + `距上一条${baseline}已过：${elapsed}。`
 }
 
 /** Reject refresh intervals that cannot represent an exact elapsed-millisecond threshold. */

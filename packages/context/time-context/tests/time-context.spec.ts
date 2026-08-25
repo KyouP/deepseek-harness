@@ -161,9 +161,9 @@ describe('durable step context', () => {
     await fire(ctx, sessionAgent(session), 1, 1)
 
     expect(contextTexts(session)).toEqual([
-      'Time sampled while preparing turn 1, step 1: 2026-07-15T09:01:01+08:00[Asia/Shanghai]\n'
-      + 'Browser time zone for this request: Asia/Shanghai. Interpret otherwise-unqualified dates and times in this zone.\n'
-      + 'Elapsed since the preceding model-visible message: 1d 1h 1m 1s.',
+      '准备第 1 轮第 1 步时采样的时间：2026-07-15T09:01:01+08:00[Asia/Shanghai]\n'
+      + '本请求的浏览器时区：Asia/Shanghai。未明确时区的日期时间按此时区解释。\n'
+      + '距上一条模型可见消息已过：1天 1小时 1分 1秒。',
     ])
     const event = session.events.at(-1)
     expect(event?.type).toBe('user/message')
@@ -177,9 +177,9 @@ describe('durable step context', () => {
       form: 'snapshot',
       sections: [{
         name: 'time-context',
-        text: 'Time sampled while preparing turn 1, step 1: 2026-07-15T09:01:01+08:00[Asia/Shanghai]\n'
-          + 'Browser time zone for this request: Asia/Shanghai. Interpret otherwise-unqualified dates and times in this zone.\n'
-          + 'Elapsed since the preceding model-visible message: 1d 1h 1m 1s.',
+        text: '准备第 1 轮第 1 步时采样的时间：2026-07-15T09:01:01+08:00[Asia/Shanghai]\n'
+          + '本请求的浏览器时区：Asia/Shanghai。未明确时区的日期时间按此时区解释。\n'
+          + '距上一条模型可见消息已过：1天 1小时 1分 1秒。',
       }],
     })
     expect(event.surfaceOp).toBe('append')
@@ -193,7 +193,7 @@ describe('durable step context', () => {
     await fire(ctx, sessionAgent(session), 1, 1)
 
     expect(contextTexts(session)[0]).toContain(
-      'Elapsed since the preceding model-visible message: unavailable.',
+      '距上一条模型可见消息已过：不可用。',
     )
   })
 
@@ -211,9 +211,9 @@ describe('durable step context', () => {
     await fire(ctx, agent, 3, 2)
 
     expect(contextTexts(session)[1]).toBe(
-      'Time sampled while preparing turn 3, step 2: 2026-07-14T00:01:01+00:00[UTC]\n'
-      + 'Browser time zone for this request: unavailable. Ask the user to clarify otherwise-unqualified dates and times.\n'
-      + 'Elapsed since the preceding step context: 1m 1s.',
+      '准备第 3 轮第 2 步时采样的时间：2026-07-14T00:01:01+00:00[UTC]\n'
+      + '本请求的浏览器时区：不可用。未明确时区的日期时间请向用户澄清。\n'
+      + '距上一条步骤上下文已过：1分 1秒。',
     )
   })
 
@@ -224,8 +224,8 @@ describe('durable step context', () => {
     await fire(ctx, sessionAgent(resolved), 1, 1)
     expect(contextTexts(resolved)[0]).toContain(
       '2026-07-13T20:00:00-04:00[America/New_York]\n'
-      + 'Browser time zone for this request: America/New_York. '
-      + 'Interpret otherwise-unqualified dates and times in this zone.',
+      + '本请求的浏览器时区：America/New_York。'
+      + '未明确时区的日期时间按此时区解释。',
     )
 
     const mixed = Session.create(SessionId('browser-zone-mixed'))
@@ -241,8 +241,8 @@ describe('durable step context', () => {
     await fire(ctx, sessionAgent(mixed), 1, 1)
     expect(contextTexts(mixed)[0]).toContain(
       '2026-07-14T00:00:00+00:00[UTC]\n'
-      + 'Browser time zone for this request: mixed ["America/New_York","Asia/Shanghai"]. '
-      + 'Ask the user to clarify otherwise-unqualified dates and times.',
+      + '本请求的浏览器时区：混合 ["America/New_York","Asia/Shanghai"]。'
+      + '未明确时区的日期时间请向用户澄清。',
     )
   })
 
@@ -254,7 +254,7 @@ describe('durable step context', () => {
     await fire(ctx, sessionAgent(session), 4, 2)
 
     expect(contextTexts(session)[0]).toContain(
-      'Elapsed since the preceding step context: unavailable.',
+      '距上一条步骤上下文已过：不可用。',
     )
   })
 
@@ -265,7 +265,7 @@ describe('durable step context', () => {
     await fire(ctx, sessionAgent(session), 1, 2)
 
     expect(contextTexts(session)[0]).toContain(
-      'Elapsed since the preceding step context: unavailable.',
+      '距上一条步骤上下文已过：不可用。',
     )
   })
 
@@ -280,7 +280,7 @@ describe('durable step context', () => {
     await fire(ctx, agent, 1, 2)
 
     expect(contextTexts(session)).toHaveLength(2)
-    expect(contextTexts(session)[1]).toContain('Elapsed since the preceding step context: 0s.')
+    expect(contextTexts(session)[1]).toContain('距上一条步骤上下文已过：0秒。')
   })
 
   it('uses a shadowed durable injection after resume and injects at the exact threshold', async () => {
@@ -299,7 +299,7 @@ describe('durable step context', () => {
       sourceEventSeqs: [user.seq, reading.seq],
     })
     original.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
-    expect(JSON.stringify(original.deriveMessages())).not.toContain('Time sampled while preparing')
+    expect(JSON.stringify(original.deriveMessages())).not.toContain('采样的时间')
 
     const resumed = Session.create(SessionId('resumed'), [...original.events])
     const resumedAgent = sessionAgent(resumed)
@@ -317,7 +317,7 @@ describe('durable step context', () => {
 
     expect(contextTexts(resumed)).toHaveLength(2)
     expect(contextTexts(resumed)[1]).toContain(
-      'Elapsed since the preceding step context: unavailable.',
+      '距上一条步骤上下文已过：不可用。',
     )
   })
 
@@ -464,16 +464,16 @@ describe('real agent-loop request history', () => {
 
     const firstRequestText = requestText(adapter.requests[0]!)
     const secondRequestText = requestText(adapter.requests[1]!)
-    expect(firstRequestText).toContain('Time sampled while preparing turn 1, step 1:')
-    expect(firstRequestText).toContain('Elapsed since the preceding model-visible message: unavailable.')
-    expect(firstRequestText).not.toContain('Time sampled while preparing turn 1, step 2:')
-    expect(secondRequestText).toContain('Time sampled while preparing turn 1, step 1:')
-    expect(secondRequestText).toContain('Time sampled while preparing turn 1, step 2:')
-    expect(secondRequestText).toContain('Elapsed since the preceding step context: 1m 1s.')
+    expect(firstRequestText).toContain('准备第 1 轮第 1 步时采样的时间：')
+    expect(firstRequestText).toContain('距上一条模型可见消息已过：不可用。')
+    expect(firstRequestText).not.toContain('准备第 1 轮第 2 步时采样的时间：')
+    expect(secondRequestText).toContain('准备第 1 轮第 1 步时采样的时间：')
+    expect(secondRequestText).toContain('准备第 1 轮第 2 步时采样的时间：')
+    expect(secondRequestText).toContain('距上一条步骤上下文已过：1分 1秒。')
 
-    for (const request of adapter.requests) expect(request.system).not.toContain('Time sampled while preparing')
+    for (const request of adapter.requests) expect(request.system).not.toContain('采样的时间：')
     const headers = agent.session.events.filter(event => event.type === 'request/header')
-    expect(JSON.stringify(headers)).not.toContain('Time sampled while preparing')
+    expect(JSON.stringify(headers)).not.toContain('采样的时间：')
     await ctx.fiber.dispose()
   })
 })
@@ -496,6 +496,6 @@ describe('real Loader export path', () => {
     const session = Session.create(SessionId('loader'))
     openMessageTurn(session, 1)
     await fire(ctx, sessionAgent(session), 1, 1)
-    expect(contextTexts(session)[0]).toContain('Time sampled while preparing turn 1, step 1:')
+    expect(contextTexts(session)[0]).toContain('准备第 1 轮第 1 步时采样的时间：')
   })
 })

@@ -12,11 +12,11 @@ import { createTimestampFormatter, formatTimestamp } from './timestamp.ts'
 const PACKAGE_NAME = '@deepseek-ai/dsh-time-context'
 const SOURCE_NAME = 'time-context'
 const READING = new RegExp(
-  '^Time sampled while preparing turn (\\d+), step (\\d+): '
+  '^准备第 (\\d+) 轮第 (\\d+) 步时采样的时间：'
   + '(\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:Z|[+-]\\d{2}:\\d{2})\\[[^\\]]+\\])\\n'
-  + '(Browser time zone for this request: .+)\\n'
-  + 'Elapsed since the preceding (model-visible message|step context): '
-  + '(?:unavailable|(?:(?:\\d+d )?(?:\\d+h )?(?:\\d+m )?\\d+s))\\.$',
+  + '(本请求的浏览器时区：.+)\\n'
+  + '距上一条(模型可见消息|步骤上下文)已过：'
+  + '(?:不可用|(?:(?:\\d+天 )?(?:\\d+小时 )?(?:\\d+分 )?\\d+秒))。$',
 )
 
 /** Cordis companion plugin name. */
@@ -130,7 +130,7 @@ function validateReading(
     fail('time-context browser-zone text does not match current-turn user messages')
   }
   const baseline = match[5]
-  if ((step === 1) !== (baseline === 'model-visible message')) {
+  if ((step === 1) !== (baseline === '模型可见消息')) {
     fail(`time-context step ${step} uses the wrong elapsed-time baseline ${JSON.stringify(baseline)}`)
   }
   const rendered = match[3]

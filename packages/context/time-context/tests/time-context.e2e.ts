@@ -70,15 +70,15 @@ describe('time-context through a real headless cordis.yml', () => {
       .map(block => block.text)
       .join('\n'))
     expect(contextText[0]).toMatch(
-      /Time sampled while preparing turn 1, step 1: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+08:00\[Asia\/Shanghai\]/,
+      /准备第 1 轮第 1 步时采样的时间：\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+08:00\[Asia\/Shanghai\]/,
     )
-    expect(contextText[0]).toContain('Elapsed since the preceding model-visible message: unavailable.')
-    expect(contextText[1]).toMatch(/Time sampled while preparing turn 2, step 1:/)
+    expect(contextText[0]).toContain('距上一条模型可见消息已过：不可用。')
+    expect(contextText[1]).toMatch(/准备第 2 轮第 1 步时采样的时间：/)
     expect(contextText[1]).toMatch(
-      /Elapsed since the preceding model-visible message: (?:\d+d )?(?:\d+h )?(?:\d+m )?\d+s\./,
+      /距上一条模型可见消息已过：(?:(?:\d+天 )?(?:\d+小时 )?(?:\d+分 )?\d+秒)。/,
     )
 
     const headers = events.filter(event => event.type === 'request/header')
-    expect(JSON.stringify(headers)).not.toContain('Time sampled while preparing')
+    expect(JSON.stringify(headers)).not.toContain('采样的时间')
   }, LOADER_SMOKE_TEST_TIMEOUT_MS)
 })

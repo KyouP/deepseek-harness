@@ -47,17 +47,17 @@
 ##### 第一步
 
 ```markdown
-Time sampled while preparing turn <turn>, step 1: <timestamp>
-Browser time zone for this request: <iana-zone-or-mixed-or-unavailable-policy>.
-Elapsed since the preceding model-visible message: <duration-or-unavailable>.
+准备第 <turn> 轮第 1 步时采样的时间：<timestamp>
+本请求的浏览器时区：<iana-zone-or-mixed-or-unavailable-policy>。
+距上一条模型可见消息已过：<duration-or-unavailable>。
 ```
 
 ##### 后续步骤
 
 ```markdown
-Time sampled while preparing turn <turn>, step <step>: <timestamp>
-Browser time zone for this request: <iana-zone-or-mixed-or-unavailable-policy>.
-Elapsed since the preceding step context: <duration-or-unavailable>.
+准备第 <turn> 轮第 <step> 步时采样的时间：<timestamp>
+本请求的浏览器时区：<iana-zone-or-mixed-or-unavailable-policy>。
+距上一条步骤上下文已过：<duration-or-unavailable>。
 ```
 
 #### Token 影响

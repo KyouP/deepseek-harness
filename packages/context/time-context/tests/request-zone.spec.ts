@@ -48,10 +48,10 @@ describe('browser request-zone context', () => {
 
   it('renders one explicit model policy for every context', () => {
     expect(renderBrowserTimeZoneContext({ kind: 'resolved', timeZone: 'Asia/Shanghai' }))
-      .toContain('Interpret otherwise-unqualified dates and times in this zone.')
+      .toContain('未明确时区的日期时间按此时区解释。')
     expect(renderBrowserTimeZoneContext({
       kind: 'mixed', timeZones: ['America/New_York', 'Asia/Shanghai'],
-    })).toContain('mixed ["America/New_York","Asia/Shanghai"]')
-    expect(renderBrowserTimeZoneContext({ kind: 'missing' })).toContain('unavailable')
+    })).toContain('混合 ["America/New_York","Asia/Shanghai"]')
+    expect(renderBrowserTimeZoneContext({ kind: 'missing' })).toContain('不可用')
   })
 })

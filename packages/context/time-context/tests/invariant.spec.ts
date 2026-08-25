@@ -43,13 +43,13 @@ function event(
 function reading(
   turn = '1',
   step = '1',
-  baseline = 'model-visible message',
+  baseline = '模型可见消息',
   timestamp = '2026-07-14T00:00:00+00:00[UTC]',
-  browser = 'Browser time zone for this request: unavailable. Ask the user to clarify otherwise-unqualified dates and times.',
+  browser = '本请求的浏览器时区：不可用。未明确时区的日期时间请向用户澄清。',
 ): string {
-  return `Time sampled while preparing turn ${turn}, step ${step}: ${timestamp}\n`
+  return `准备第 ${turn} 轮第 ${step} 步时采样的时间：${timestamp}\n`
     + `${browser}\n`
-    + `Elapsed since the preceding ${baseline}: unavailable.`
+    + `距上一条${baseline}已过：不可用。`
 }
 
 function preparing(turn: number, step: number, clientTimeZone?: string): Session {
@@ -88,9 +88,9 @@ function appendReading(session: Session, text: string): void {
 describe('time-context invariants', () => {
   it('accepts a reading whose turn, step, baseline, and timestamp agree', async () => {
     const ctx = await setup()
-    const text = 'Time sampled while preparing turn 2, step 3: 2026-07-14T00:00:00+00:00[UTC]\n'
-      + 'Browser time zone for this request: unavailable. Ask the user to clarify otherwise-unqualified dates and times.\n'
-      + 'Elapsed since the preceding step context: 4m 2s.'
+    const text = '准备第 2 轮第 3 步时采样的时间：2026-07-14T00:00:00+00:00[UTC]\n'
+      + '本请求的浏览器时区：不可用。未明确时区的日期时间请向用户澄清。\n'
+      + '距上一条步骤上下文已过：4分 2秒。'
     expect(() => { ctx.emit('session/event', preparing(2, 3), event(text)) }).not.toThrow()
   })
 
@@ -103,13 +103,13 @@ describe('time-context invariants', () => {
 
   it('requires browser-zone policy and timestamp to match current-turn request provenance', async () => {
     const ctx = await setup()
-    const policy = 'Browser time zone for this request: Asia/Shanghai. '
-      + 'Interpret otherwise-unqualified dates and times in this zone.'
+    const policy = '本请求的浏览器时区：Asia/Shanghai。'
+      + '未明确时区的日期时间按此时区解释。'
     expect(() => {
       ctx.emit('session/event', preparing(1, 1, 'Asia/Shanghai'), event(reading(
         '1',
         '1',
-        'model-visible message',
+        '模型可见消息',
         '2026-07-14T08:00:00+08:00[Asia/Shanghai]',
         policy,
       ), SECOND + 456))
@@ -121,7 +121,7 @@ describe('time-context invariants', () => {
       ctx.emit('session/event', preparing(1, 1, 'Asia/Shanghai'), event(reading(
         '1',
         '1',
-        'model-visible message',
+        '模型可见消息',
         '2026-07-14T00:00:00+00:00[UTC]',
         policy,
       )))
@@ -130,8 +130,8 @@ describe('time-context invariants', () => {
 
   it('reports browser-zone timestamp formatter failures as invariant violations', async () => {
     const ctx = await setup()
-    const policy = 'Browser time zone for this request: Asia/Shanghai. '
-      + 'Interpret otherwise-unqualified dates and times in this zone.'
+    const policy = '本请求的浏览器时区：Asia/Shanghai。'
+      + '未明确时区的日期时间按此时区解释。'
     const formatToParts = vi.spyOn(Intl.DateTimeFormat.prototype, 'formatToParts')
       .mockImplementationOnce(() => { throw new RangeError('formatter unavailable') })
     try {
@@ -139,7 +139,7 @@ describe('time-context invariants', () => {
         ctx.emit('session/event', preparing(1, 1, 'Asia/Shanghai'), event(reading(
           '1',
           '1',
-          'model-visible message',
+          '模型可见消息',
           '2026-07-14T08:00:00+08:00[Asia/Shanghai]',
           policy,
         )))
@@ -152,13 +152,13 @@ describe('time-context invariants', () => {
   it('rejects invalid browser provenance loaded across the durable boundary', async () => {
     const ctx = await setup()
     const timeZone = 'Not/A_Real_Zone'
-    const policy = `Browser time zone for this request: ${timeZone}. `
-      + 'Interpret otherwise-unqualified dates and times in this zone.'
+    const policy = `本请求的浏览器时区：${timeZone}。`
+      + '未明确时区的日期时间按此时区解释。'
     expect(() => {
       ctx.emit('session/event', preparing(1, 1, timeZone), event(reading(
         '1',
         '1',
-        'model-visible message',
+        '模型可见消息',
         `2026-07-14T00:00:00+00:00[${timeZone}]`,
         policy,
       )))
@@ -180,10 +180,10 @@ describe('time-context invariants', () => {
       ctx.emit('session/event', session, event(reading(
         '1',
         '1',
-        'model-visible message',
+        '模型可见消息',
         '2026-07-14T00:00:00+00:00[UTC]',
-        'Browser time zone for this request: mixed ["Asia/Shanghai","Not/A_Real_Zone"]. '
-        + 'Ask the user to clarify otherwise-unqualified dates and times.',
+        '本请求的浏览器时区：混合 ["Asia/Shanghai","Not/A_Real_Zone"]。'
+        + '未明确时区的日期时间请向用户澄清。',
       )))
     }).toThrow(/browser time zone is unsupported/)
   })
@@ -214,15 +214,15 @@ describe('time-context invariants', () => {
       content: [{ type: 'text', text: 'prepare' }],
       source: { kind: 'user' },
     }), { surfaceOp: 'append' })
-    appendReading(session, reading('1', '2', 'step context'))
+    appendReading(session, reading('1', '2', '步骤上下文'))
 
     await ctx.plugin(InvariantRegistry, { enabled: true })
     await expect(ctx.plugin(TimeInvariant).then(() => undefined)).rejects.toThrow(/expected turn 1\/step 1/)
   })
 
   it.each([
-    [reading('1', '3', 'step context'), /expected turn 2\/step 3/],
-    [reading('2', '2', 'step context'), /expected turn 2\/step 3/],
+    [reading('1', '3', '步骤上下文'), /expected turn 2\/step 3/],
+    [reading('2', '2', '步骤上下文'), /expected turn 2\/step 3/],
   ])('rejects a reading that disagrees with its session position', async (text, message) => {
     const ctx = await setup()
     expect(() => { ctx.emit('session/event', preparing(2, 3), event(text)) }).toThrow(message)
@@ -232,7 +232,7 @@ describe('time-context invariants', () => {
     const ctx = await setup()
     const session = preparing(1, 2)
     session.append('turn/end', { turn: 1, reason: { kind: 'aborted', reason: { kind: 'user' } } })
-    expect(() => { ctx.emit('session/event', session, event(reading('1', '2', 'step context'))) })
+    expect(() => { ctx.emit('session/event', session, event(reading('1', '2', '步骤上下文'))) })
       .toThrow(/inside an open turn/)
   })
 
@@ -259,11 +259,11 @@ describe('time-context invariants', () => {
     ['not a reading', SECOND, undefined, /durable reading format/],
     [reading('0'), SECOND, undefined, /positive safe integers/],
     [reading('999999999999999999999'), SECOND, undefined, /positive safe integers/],
-    [reading('1', '0', 'step context'), SECOND, undefined, /positive safe integers/],
-    [reading('1', '999999999999999999999', 'step context'), SECOND, undefined, /positive safe integers/],
-    [reading('1', '1', 'step context'), SECOND, undefined, /wrong elapsed-time baseline/],
-    [reading('1', '2', 'model-visible message'), SECOND, undefined, /wrong elapsed-time baseline/],
-    [reading('1', '1', 'model-visible message', '2026-99-99T00:00:00+00:00[UTC]'), SECOND, undefined, /must parse and not postdate/],
+    [reading('1', '0', '步骤上下文'), SECOND, undefined, /positive safe integers/],
+    [reading('1', '999999999999999999999', '步骤上下文'), SECOND, undefined, /positive safe integers/],
+    [reading('1', '1', '步骤上下文'), SECOND, undefined, /wrong elapsed-time baseline/],
+    [reading('1', '2', '模型可见消息'), SECOND, undefined, /wrong elapsed-time baseline/],
+    [reading('1', '1', '模型可见消息', '2026-99-99T00:00:00+00:00[UTC]'), SECOND, undefined, /must parse and not postdate/],
     [reading(), Number.NaN, undefined, /must parse and not postdate/],
     [reading(), SECOND - 1, undefined, /must parse and not postdate/],
     ['ignored', SECOND, [], /exactly one text block/],
@@ -272,7 +272,7 @@ describe('time-context invariants', () => {
     [reading(), SECOND, [{ type: 'text', text: reading(), extra: true }], /exactly one text block/],
   ] as const)('rejects an incoherent durable reading', async (text, time, content, message) => {
     const ctx = await setup()
-    const preparationStep = text.includes('turn 1, step 2:') ? 2 : 1
+    const preparationStep = text.includes('第 1 轮第 2 步') ? 2 : 1
     expect(() => {
       ctx.emit('session/event', preparing(1, preparationStep), event(
         text,
@@ -318,7 +318,7 @@ describe('time-context invariants', () => {
 
   it('validates a seeded Session created after invariant registration', async () => {
     const ctx = await setup()
-    const text = reading('1', '2', 'step context')
+    const text = reading('1', '2', '步骤上下文')
     expect(() => {
       ctx.sessions.create(SessionId('time-invariant-created-invalid'), {
         seed: [
