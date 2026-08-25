@@ -123,6 +123,37 @@ describe('extractLastTurn', () => {
     ]
     expect(extractLastTurn(events)).toEqual({ user: '块一块二', assistant: '答' })
   })
+
+  it('skips plugin-sourced user messages (runtime-context snapshot / time reading)', () => {
+    // 生产事件序：真人输入 → pre-step 追加的插件快照/时间读数 → assistant 输出。
+    // 朴素地取"最后一条 user/message"会把快照当对话内容蒸馏（2026-08-25 trace 实证）。
+    const events = [
+      { type: 'user/message', data: { content: '我鼻炎该挂什么科' }, seq: 1 },
+      {
+        type: 'user/message',
+        data: { content: 'Current runtime context…承诺…', source: { kind: 'plugin', plugin: 'system-prompt', form: 'snapshot' } },
+        seq: 2,
+      },
+      {
+        type: 'user/message',
+        data: { content: 'Time sampled while preparing turn 3, step 1…', source: { kind: 'plugin', plugin: 'time-context', form: 'snapshot' } },
+        seq: 3,
+      },
+      { type: 'assistant/chunk', data: { chunk: { type: 'text-delta', text: '挂耳鼻喉科' } }, seq: 4 },
+    ]
+    expect(extractLastTurn(events)).toEqual({ user: '我鼻炎该挂什么科', assistant: '挂耳鼻喉科' })
+  })
+
+  it('returns null when the only user messages are plugin-sourced', () => {
+    expect(extractLastTurn([
+      {
+        type: 'user/message',
+        data: { content: 'Time sampled…', source: { kind: 'plugin', plugin: 'time-context' } },
+        seq: 1,
+      },
+      { type: 'assistant/chunk', data: { chunk: { type: 'text-delta', text: '答' } }, seq: 2 },
+    ])).toBeNull()
+  })
 })
 
 describe('Sedimenter gates', () => {
@@ -205,10 +236,12 @@ describe('Sedimenter gates', () => {
 
   it('distill prompt carries a 当前时间 anchor; attempt result is info-logged', async () => {
     let seenPrompt = ''
+    let seenSystem = ''
     const capturing: LlmBackend = {
       name: 'cap',
       async complete(req): Promise<string | null> {
         seenPrompt = req.user
+        seenSystem = req.system
         return '（无）'
       },
     }
@@ -223,6 +256,9 @@ describe('Sedimenter gates', () => {
     expect(await sed.runOnce(makeAgent(longEvents()), 1)).toBe('empty')
     // 时间锚点：本地日期时间 + 星期 + 时区，相对期限换算的基准
     expect(seenPrompt).toMatch(/【当前时间】\d{4}-\d{2}-\d{2} \d{2}:\d{2} 周[日一二三四五六]（.+）/)
+    // 时间规则：相对时间词必须换算成绝对日期（system 禁令 + prompt 内日期示例）
+    expect(seenSystem).toContain('禁止出现「今天/今晚/明天/下周」等相对时间词')
+    expect(seenPrompt).toMatch(/示例：输入「今晚一起玩游戏」→ \[CARD\]\[emo:0\.5\] \d{4}-\d{2}-\d{2} 晚/)
     expect(info).toHaveBeenCalledWith(expect.stringContaining('sediment session=s1 turn=1 -> empty'))
   })
 })

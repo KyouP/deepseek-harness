@@ -93,6 +93,11 @@ class OllamaBackend implements LlmBackend {
           system: req.system,
           prompt: req.user,
           stream: false,
+          // 提炼类任务不需要推理过程：thinking 模型（如 Qwen3.5）的思考
+          // token 计入 num_predict 且生成耗时长一个数量级（实测同 prompt
+          // 90s 超时 vs 关闭后 3-5s，极端时响应被思考挤成空串）。不支持
+          // thinking 的模型会忽略该字段。
+          think: false,
           options: { num_predict: req.maxTokens ?? DEFAULT_MAX_TOKENS },
         }),
         signal: timeoutSignal(req, this.defaultTimeoutMs),

@@ -86,7 +86,8 @@ const DEFAULT_IDLE_MINUTES = 30
 const DEFAULT_DECAY_LAMBDA_PER_DAY = 0.02
 const DEFAULT_DECAY_ARCHIVE_BELOW = 0.2
 
-const DISTILL_SYSTEM = '你是记忆蒸馏器。把一批过期便签提炼成少量值得长期保存的记忆条目，严格按标记逐行输出；没有值得记的就输出（无）。不要输出任何其他内容。'
+const DISTILL_SYSTEM = '你是记忆蒸馏器。把一批过期便签提炼成少量值得长期保存的记忆条目，严格按标记逐行输出；没有值得记的就输出（无）。不要输出任何其他内容。\n'
+  + '时间规则：输出条目里禁止出现「今天/今晚/明天/下周」等相对时间词，必须按【当前时间】换算成绝对日期（如 2026-08-25 晚、2026-08-26 下午），否则这条记忆明天就会指错日期。'
 const RECOMPILE_SYSTEM = '你是画像合并编辑器。把已批准的用户画像建议合并进现有画像文本，保持简洁、自包含，不丢失既有信息。只输出合并后的完整画像文本，不要输出任何其他内容。'
 
 export class Consolidator {

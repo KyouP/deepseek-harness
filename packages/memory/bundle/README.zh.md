@@ -165,7 +165,7 @@ ollama pull bge-m3       # 可选：向量召回通道（embedEnabled=true 时�
 | `preheatBudgetChars` | `800` | 唤醒预热注入字符预算 |
 | `llmBackend` | `'auto'` | LLM 后端链：`auto`（ollama→openai→main 逐路回退）/ `ollama` / `openai` / `main` / `off`（全关） |
 | `ollamaHost` | `'http://127.0.0.1:11434'` | Ollama 服务地址 |
-| `ollamaModel` | `'qwen3.5:4b'` | 提炼模型（沉淀/巩固/画像重编译用） |
+| `ollamaModel` | `'qwen3.5:4b'` | 提炼模型（沉淀/巩固/画像重编译用）。推理模型（Qwen3.x 等）自动以 `think:false` 调用——思考 token 计入 num_predict 且慢一个数量级，提炼任务不需要 |
 | `openaiBaseUrl` / `openaiApiKey` / `openaiModel` | `''` | OpenAI 兼容后端（`auto` 链中 baseUrl 非空才启用） |
 | `mainProvider` / `mainModel` | `''` | 宿主主模型后端（`auto` 链中两者都非空才启用） |
 | `llmTimeoutMs` | `90000` | 单次 LLM 调用超时 |

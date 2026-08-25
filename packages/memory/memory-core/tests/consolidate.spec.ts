@@ -100,10 +100,12 @@ describe('Consolidator', () => {
 
   it('distill prompt carries a 当前时间 anchor; run info-logs the report', async () => {
     let seenPrompt = ''
+    let seenSystem = ''
     const capturing: LlmBackend = {
       name: 'cap',
       async complete(req): Promise<string | null> {
         seenPrompt = req.user
+        seenSystem = req.system
         return '（无）'
       },
     }
@@ -119,6 +121,7 @@ describe('Consolidator', () => {
 
     expect(report.distilled).toBe(0)
     expect(seenPrompt).toMatch(/【当前时间】\d{4}-\d{2}-\d{2} \d{2}:\d{2} 周[日一二三四五六]（.+）/)
+    expect(seenSystem).toContain('禁止出现「今天/今晚/明天/下周」等相对时间词')
     expect(info).toHaveBeenCalledWith(expect.stringContaining(
       'consolidation report distilled=0 superseded=0 linked=0 recompiled=false'))
   })

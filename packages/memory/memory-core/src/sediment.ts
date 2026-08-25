@@ -80,7 +80,8 @@ interface PendingEntry {
   workspace: string | null
 }
 
-const SYSTEM = '你是记忆提炼器。从一轮对话中提炼值得长期保存的信息，严格按标记逐行输出；没有值得记的就输出（无）。不要输出任何其他内容。'
+const SYSTEM = '你是记忆提炼器。从一轮对话中提炼值得长期保存的信息，严格按标记逐行输出；没有值得记的就输出（无）。不要输出任何其他内容。\n'
+  + '时间规则：输出条目里禁止出现「今天/今晚/明天/下周」等相对时间词，必须按【当前时间】换算成绝对日期（如 2026-08-25 晚、2026-08-26 下午），否则这条记忆明天就会指错日期。'
 
 const MAX_RETRIES = 5
 const TAIL_BUDGET = 900
@@ -100,6 +101,12 @@ export function nowLine(now: Date): string {
   const time = `${pad(now.getHours())}:${pad(now.getMinutes())}`
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
   return `【当前时间】${date} ${time} 周${WEEKDAYS[now.getDay()]}（${tz}）`
+}
+
+/** 本地日期 `YYYY-MM-DD`（prompt 示例里的绝对日期示范值，与 nowLine 同源）。 */
+export function localDateStr(now: Date): string {
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
 }
 
 /**
@@ -251,14 +258,25 @@ function routeCommitment(content: string, deps: SedimentRouteDeps): boolean {
 }
 
 /**
- * Extract the last turn: the final `user/message` event's text plus every
- * assistant `text-delta` chunk after it, concatenated. Returns null when the
- * session has no user message.
+ * Extract the last turn: the final GENUINE user `user/message` event's text
+ * plus every assistant `text-delta` chunk after it, concatenated. Returns null
+ * when the session has no genuine user message.
+ *
+ * Plugin-sourced user messages (`data.source.kind === 'plugin'` — runtime
+ * context snapshots, time-context readings) are skipped: they are appended
+ * AFTER the human input in the same turn batch, so a naive "last user message"
+ * scan would distill the injected snapshot instead of what the human said
+ * (trace 实证 2026-08-25：【用户说】整个是 runtime context，真实提问丢失）。
  */
 export function extractLastTurn(events: SessionEventLike[]): { user: string; assistant: string } | null {
   let lastUser = -1
   for (let i = events.length - 1; i >= 0; i--) {
-    if (events[i]?.type === 'user/message') { lastUser = i; break }
+    const event = events[i]
+    if (event?.type !== 'user/message') continue
+    const source = (event.data as { source?: { kind?: unknown } } | undefined)?.source
+    if (source?.kind === 'plugin') continue
+    lastUser = i
+    break
   }
   if (lastUser < 0) return null
   const userData = events[lastUser]?.data as { content?: unknown } | undefined
@@ -442,17 +460,19 @@ export class Sedimenter {
   }
 
   private buildPrompt(user: string, assistant: string): string {
+    const now = new Date()
     return [
-      nowLine(new Date()),
+      nowLine(now),
       `【用户说】${user.slice(0, 3000)}`,
       `【你回答】${assistant.slice(0, 3000)}`,
       `【已有记忆尾部，避免重复】${this.memoryTail()}`,
       '输出格式（每行一条）：',
       '[CARD][emo:0.0-1.0] 事件/偏好/状态，一句自包含的话（emo 为情绪强度，越强烈越高）',
       '[FACT] 主体 | 属性 | 值（稳定事实，如 主人 | 职业 | 工程师）',
-      '[COMMITMENT] 你在本轮亲口许下的待办 | ISO期限（"明天"等相对期限按当前时间换算；没提期限可省略竖线后段）',
+      `[COMMITMENT] 你在本轮亲口许下的待办 | ISO期限（如 [COMMITMENT] 提醒主人玩游戏 | ${localDateStr(now)}T20:00:00+08:00；没提期限可省略竖线后段）`,
       '[USER] 用户画像增量（性格/偏好/背景）',
       '（无）',
+      `示例：输入「今晚一起玩游戏」→ [CARD][emo:0.5] ${localDateStr(now)} 晚主人约一起玩游戏`,
     ].join('\n')
   }
 

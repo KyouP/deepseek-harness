@@ -48,7 +48,7 @@ describe('llm backends', () => {
     const b = createBackend(baseConfig({ llmBackend: 'ollama' }))
     expect(await b.complete({ system: 's', user: 'u' })).toBe('提炼结果')
     expect(calls[0]).toEqual(['http://127.0.0.1:11434/api/generate',
-      { model: 'qwen3.5:4b', system: 's', prompt: 'u', stream: false, options: { num_predict: 1024 } }])
+      { model: 'qwen3.5:4b', system: 's', prompt: 'u', stream: false, think: false, options: { num_predict: 1024 } }])
   })
 
   it('returns null on network error and on non-200', async () => {
