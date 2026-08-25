@@ -16,7 +16,14 @@ function isBuildFaceClient(value: unknown): boolean {
 export default defineConfig(({ env }) => {
   const client = isBuildFaceClient(env?.DSH_BUILD_FACE)
   return {
-    workspace: ['vendor/*', 'packages/*/*', 'apps/cli'],
+    // mem-enhance is a one-level package: 'packages/*/*' would otherwise also
+    // match its subdirectories (src/lib) as phantom workspace packages, so the
+    // explicit exclude is required (it replaces tsdown's default excludes —
+    // restated here).
+    workspace: {
+      include: ['vendor/*', 'packages/*/*', 'packages/mem-enhance', 'apps/cli'],
+      exclude: ['**/node_modules/**', '**/dist/**', '**/test?(s)/**', '**/t?(e)mp/**', 'packages/mem-enhance/*'],
+    },
     entry: client ? '' : ['lib/types/{index,invariant,startup}.js'],
     outDir: 'lib',
     format: ['esm'],

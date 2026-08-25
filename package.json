@@ -11,6 +11,7 @@
   "workspaces": [
     "vendor/*",
     "packages/*/*",
+    "packages/mem-enhance",
     "native/landlock-run",
     "native/landlock-run/packages/*",
     "apps/*",
