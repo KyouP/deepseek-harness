@@ -38,11 +38,11 @@ function resolveWorkspaceRoot(path: string): string {
 function renderPolicyContext(policy: SandboxExecutionPolicy): string {
   switch (policy.mode) {
     case 'read-only':
-      return 'Current DSH file policy: read-only. Any available operation enforced by the DSH file sandbox cannot modify files in the standing mode. Do not refuse a required modification from this policy alone: try an available tool normally and follow any denial and escalation guidance it returns.'
+      return '当前 DSH 文件策略：read-only（只读）。任何受 DSH 文件沙箱约束的可用操作都不能修改文件。不要仅凭本策略拒绝必须的修改：先正常尝试可用工具，再遵循工具返回的拒绝与升级指引。'
     case 'workspace-write':
-      return `Current DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files under the session workspace: ${JSON.stringify(policy.workspaceRoot)}. Some platform temporary areas may also be writable.`
+      return `当前 DSH 文件策略：workspace-write（工作区可写）。任何受 DSH 文件沙箱约束的可用操作可修改会话工作区内的文件：${JSON.stringify(policy.workspaceRoot)}。部分平台临时目录也可能可写。`
     case 'danger-full-access':
-      return 'Current DSH file policy: danger-full-access. The DSH file sandbox does not restrict file modifications by available operations.'
+      return '当前 DSH 文件策略：danger-full-access（完全访问）。DSH 文件沙箱不限制可用操作对文件的修改。'
     /* v8 ignore next 4 -- SandboxMode is a typed same-process closed union; this branch is only the static exhaustiveness guard. */
     default: {
       const mode: never = policy.mode

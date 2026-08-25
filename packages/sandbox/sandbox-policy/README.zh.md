@@ -39,19 +39,19 @@
 ##### 只读
 
 ```markdown
-Current DSH file policy: read-only. Any available operation enforced by the DSH file sandbox cannot modify files in the standing mode. Do not refuse a required modification from this policy alone: try an available tool normally and follow any denial and escalation guidance it returns.
+当前 DSH 文件策略：read-only（只读）。任何受 DSH 文件沙箱约束的可用操作都不能修改文件。不要仅凭本策略拒绝必须的修改：先正常尝试可用工具，再遵循工具返回的拒绝与升级指引。
 ```
 
 ##### 工作区写入
 
 ```markdown
-Current DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files under the session workspace: "<workspace root>". Some platform temporary areas may also be writable.
+当前 DSH 文件策略：workspace-write（工作区可写）。任何受 DSH 文件沙箱约束的可用操作可修改会话工作区内的文件："<workspace root>"。部分平台临时目录也可能可写。
 ```
 
 ##### 完全访问
 
 ```markdown
-Current DSH file policy: danger-full-access. The DSH file sandbox does not restrict file modifications by available operations.
+当前 DSH 文件策略：danger-full-access（完全访问）。DSH 文件沙箱不限制可用操作对文件的修改。
 ```
 
 #### Token 影响
