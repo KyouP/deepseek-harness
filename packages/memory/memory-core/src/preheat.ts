@@ -18,6 +18,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { MemoryStore } from '@deepseek-ai/dsh-memory-store'
 import { truncateChars } from './budget.ts'
 import { sanitizeForInjection } from './sanitize.ts'
+import { dueLabel, todayHeader } from './time.ts'
 
 /** Commitments due within this many hours join the overdue ones. */
 const DUE_SOON_WITHIN_HOURS = 48
@@ -104,18 +105,29 @@ export class Preheat {
    * Assemble the three optional sections; '' when all are empty. Anniversary
    * matching uses the LOCAL calendar date (see {@link localToday}); the year
    * math reads the zero-padded ISO year prefixes directly.
+   *
+   * The block opens with a today anchor and commitment deadlines carry
+   * relative labels (see injections.ts buildCommitmentsText): stored card
+   * summaries like "今天（2026-08-24）天气不错" are yesterday's framing, and
+   * without a colocated "today" the model adopts it as its clock.
    */
   private buildBlock(): string {
-    const now = new Date().toISOString()
-    const todayLocal = localToday(new Date())
+    const nowDate = new Date()
+    const now = nowDate.toISOString()
+    const todayLocal = localToday(nowDate)
     const sections: string[] = []
 
     const overdue = this.store.dueCommitments(now)
     const dueSoon = this.store.dueSoonCommitments(now, DUE_SOON_WITHIN_HOURS)
     if (overdue.length + dueSoon.length > 0) {
+      const label = (c: { dueAt: string | null }): string => {
+        if (!c.dueAt) return ''
+        const rel = dueLabel(c.dueAt, nowDate)
+        return `（期限 ${c.dueAt}${rel ? `，${rel}` : ''}）`
+      }
       const lines = [
-        ...overdue.map(c => `- 【已到期】${c.content}${c.dueAt ? `（期限 ${c.dueAt}）` : ''}`),
-        ...dueSoon.map(c => `- ${c.content}${c.dueAt ? `（期限 ${c.dueAt}）` : ''}`),
+        ...overdue.map(c => `- 【已到期】${c.content}${label(c)}`),
+        ...dueSoon.map(c => `- ${c.content}${label(c)}`),
       ]
       sections.push(`临期/到期承诺（进入会话时主动提起）：\n${lines.join('\n')}`)
     }
@@ -135,7 +147,8 @@ export class Preheat {
       sections.push(`纪念日：\n${lines.join('\n')}`)
     }
 
-    return sections.join('\n\n')
+    if (sections.length === 0) return ''
+    return `${todayHeader(nowDate)}。\n\n${sections.join('\n\n')}`
   }
 }
 

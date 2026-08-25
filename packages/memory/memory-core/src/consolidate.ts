@@ -30,7 +30,8 @@
 
 import type { Fact, MemoryStore, NewFact, Note, Suggestion } from '@deepseek-ai/dsh-memory-store'
 import type { Embedder, LlmBackend } from './llm.ts'
-import { nowLine, parseSedimentOutput, routeSedimentItem } from './sediment.ts'
+import { parseSedimentOutput, routeSedimentItem } from './sediment.ts'
+import { nowLine } from './time.ts'
 import { autoLink } from './links.ts'
 import { sanitizeForWrite } from './sanitize.ts'
 

@@ -176,8 +176,24 @@ describe('buildCommitmentsText', () => {
     ctx.memoryStore.store.addCommitment({ content: '未来约定', dueAt: '2999-01-01T00:00:00.000Z' })
     const text = buildCommitmentsText(ctx.memoryStore.store)
     expect(text).toContain('未来约定')
+    // 超 ±30 天的期限不加相对标签（dueLabel 窗口外保持原样）
     expect(text).toContain('（期限 2999-01-01T00:00:00.000Z）')
     expect(text).not.toContain('【到期，请主动提起】')
+    await fiber.dispose()
+  })
+
+  it('anchors the block to today and labels deadlines in today-terms', async () => {
+    const { ctx, fiber } = await setup()
+    const now = new Date(2026, 7, 25, 13, 30) // 2026-08-25 周二 13:30 本地
+    const store = ctx.memoryStore.store
+    // 存储文本残留昨日框架（"明天（2026-08-25）…"）：注入层必须就地消歧
+    store.addCommitment({ content: '明天（2026-08-25）下午 3 点提醒主人多喝水', dueAt: new Date(2026, 7, 25, 15, 0).toISOString() })
+    store.addCommitment({ content: '后天交周报', dueAt: new Date(2026, 7, 27, 9, 0).toISOString() })
+    const text = buildCommitmentsText(store, 20, now)
+    expect(text).toContain('今天是 2026-08-25（周二）')
+    expect(text).toContain('提醒主人多喝水（期限 ')
+    expect(text).toContain('，今天 15:00）')
+    expect(text).toContain('，后天）')
     await fiber.dispose()
   })
 

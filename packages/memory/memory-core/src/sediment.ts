@@ -17,6 +17,7 @@ import { autoLink } from './links.ts'
 import { cardNovelty, cardRepeat, salienceScore, salienceTier } from './salience.ts'
 import { sanitizeForWrite } from './sanitize.ts'
 import { isSubagentSession, sessionWorkspace } from './workspace.ts'
+import { localDateStr, nowLine } from './time.ts'
 
 export interface SedimentConfig {
   sedimentEnabled?: boolean
@@ -87,27 +88,6 @@ const MAX_RETRIES = 5
 const TAIL_BUDGET = 900
 const MARKER_RE = /^\[(CARD|FACT|COMMITMENT|USER)\]\s*(.*)$/
 const EMO_RE = /^\[emo:([0-9]*\.?[0-9]+)\]\s*/i
-
-const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'] as const
-
-/**
- * 蒸馏/巩固 prompt 的时间锚点行：本地日期时间 + 星期 + 进程时区。
- * 提炼模型本身不知道"今天"，没有锚点时"明天下午"之类的相对期限只能
- * 瞎编（编不出合法 ISO 还会被 routeCommitment 的 Date.parse 静默丢弃）。
- */
-export function nowLine(now: Date): string {
-  const pad = (n: number): string => String(n).padStart(2, '0')
-  const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
-  const time = `${pad(now.getHours())}:${pad(now.getMinutes())}`
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
-  return `【当前时间】${date} ${time} 周${WEEKDAYS[now.getDay()]}（${tz}）`
-}
-
-/** 本地日期 `YYYY-MM-DD`（prompt 示例里的绝对日期示范值，与 nowLine 同源）。 */
-export function localDateStr(now: Date): string {
-  const pad = (n: number): string => String(n).padStart(2, '0')
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
-}
 
 /**
  * Parse the distiller's marked output into routable items. Lines without a

@@ -55,6 +55,10 @@ describe('Preheat', () => {
     expect(first).toContain('深色模式偏好')
     expect(first).toContain('年前的今天')
     expect(first).toContain('去年今天开始的日记')
+    // 今天基准头 + 期限相对标签（昨日框架的存储文本就地消歧）
+    expect(first).toMatch(/^今天是 \d{4}-\d{2}-\d{2}（周[日一二三四五六]）。/)
+    expect(first).toContain('，明天）') // 两天内交报告 dueAt=+24h（跨日历日→明天/今天 09:xx 均可能，放宽到含"，"相对标签）
+    expect(first).toMatch(/上周该回的邮件（期限 [^，]+，(昨天|今天 \d{2}:\d{2})）/)
     // One-shot: the same session does not preheat twice.
     expect(preheat.render()).toBe('')
     // A new session id renders again.

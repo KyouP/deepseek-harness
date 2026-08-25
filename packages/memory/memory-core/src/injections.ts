@@ -10,6 +10,7 @@ import type { MemoryStore } from '@deepseek-ai/dsh-memory-store'
 import type { MemoryStoreService } from './service.ts'
 import { truncateChars } from './budget.ts'
 import { sanitizeForInjection } from './sanitize.ts'
+import { dueLabel, todayHeader } from './time.ts'
 
 /** Default hard cap on injected commitment rows — P0 but not unbounded. */
 const DEFAULT_COMMITMENT_ROW_CAP = 20
@@ -29,21 +30,29 @@ export interface InjectionConfig {
 /**
  * Render the active-commitment context block: overdue items first with an
  * explicit 到期 marker so the persona raises them unprompted. Empty when idle.
+ *
+ * The header carries a today anchor and each deadline a relative label
+ * （期限 …，今天 15:00 / 明天 / 已逾期 N 天）: commitment content is stored
+ * text that may bake in yesterday's relative framing ("明天（8-25）…"), which
+ * anchors the model to the wrong "today" (2026-08-25 实证). Both additions are
+ * byte-stable within a local day, so the snapshot stays cache-neutral.
  * @param store - the memory store.
  * @param rowCap - maximum number of commitment rows injected.
+ * @param now - clock override for tests.
  * @returns context text, or ''.
  */
-export function buildCommitmentsText(store: MemoryStore, rowCap = DEFAULT_COMMITMENT_ROW_CAP): string {
-  const now = new Date().toISOString()
-  const due = store.dueCommitments(now)
-  const active = store.activeCommitments().filter(c => c.dueAt === null || c.dueAt > now)
+export function buildCommitmentsText(store: MemoryStore, rowCap = DEFAULT_COMMITMENT_ROW_CAP, now: Date = new Date()): string {
+  const nowIso = now.toISOString()
+  const due = store.dueCommitments(nowIso)
+  const active = store.activeCommitments().filter(c => c.dueAt === null || c.dueAt > nowIso)
   const rows = [...due, ...active].slice(0, rowCap)
   if (rows.length === 0) return ''
   const lines = rows.map((c) => {
-    const overdue = c.dueAt !== null && c.dueAt <= now
-    return `- ${overdue ? '【到期，请主动提起】' : ''}${c.content}${c.dueAt ? `（期限 ${c.dueAt}）` : ''}`
+    const overdue = c.dueAt !== null && c.dueAt <= nowIso
+    const label = c.dueAt ? dueLabel(c.dueAt, now) : ''
+    return `- ${overdue ? '【到期，请主动提起】' : ''}${c.content}${c.dueAt ? `（期限 ${c.dueAt}${label ? `，${label}` : ''}）` : ''}`
   })
-  return `你承诺过的事（务必逐条闭环；到期项要主动提起）：\n${lines.join('\n')}`
+  return `${todayHeader(now)}。你承诺过的事（务必逐条闭环；到期项要主动提起）：\n${lines.join('\n')}`
 }
 
 /**
