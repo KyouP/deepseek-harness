@@ -7,6 +7,8 @@
 // 本文件只消费结构化的 `LlmConfig` 子接口（字段名 / 类型与 Task 6 的
 // 完整插件 Config 一致），不 import index.ts 的 Config。
 
+import { appendFileSync } from 'node:fs'
+
 export interface LlmConfig {
   llmBackend?: 'auto' | 'ollama' | 'openai' | 'main' | 'off'
   ollamaHost?: string
@@ -17,6 +19,12 @@ export interface LlmConfig {
   mainProvider?: string
   mainModel?: string
   llmTimeoutMs?: number
+  /**
+   * LLM 交互 trace 文件路径（JSONL，默认 '' 关闭）。开启后每次
+   * complete/embed 调用记录后端名、完整 prompt、响应、耗时——观测沉淀 /
+   * 巩固等自动机制的实际触发与模型输出。内容含会话原文，仅测试调试用。
+   */
+  llmTraceFile?: string
 }
 
 export interface CompleteRequest {
@@ -178,6 +186,84 @@ class NullBackend implements LlmBackend {
 }
 
 /**
+ * 追加一行 JSONL trace 记录；任何写入失败（目录不存在 / 权限 / 磁盘）
+ * 静默吞掉——trace 是纯观测通道，绝不能让 LLM 路径因为日志而失败。
+ */
+function appendTrace(file: string, record: Record<string, unknown>): void {
+  try {
+    appendFileSync(file, `${JSON.stringify(record)}\n`)
+  } catch {
+    // observability must never break the LLM path
+  }
+}
+
+/**
+ * complete 调用 trace 装饰器：包住具体后端（ollama/openai/main 各自一条），
+ * 记录后端名、完整 prompt、响应（null = 该路失败，链式降级会走到下一路）
+ * 与耗时。嵌在 ChainBackend 内层，所以 auto 链的每次降级尝试都各自留痕。
+ */
+class TracingBackend implements LlmBackend {
+  constructor(
+    private readonly inner: LlmBackend,
+    private readonly file: string,
+  ) {}
+
+  get name(): string {
+    return this.inner.name
+  }
+
+  async complete(req: CompleteRequest): Promise<string | null> {
+    const start = Date.now()
+    let response: string | null = null
+    try {
+      response = await this.inner.complete(req)
+      return response
+    } finally {
+      appendTrace(this.file, {
+        ts: new Date().toISOString(),
+        kind: 'complete',
+        backend: this.inner.name,
+        system: req.system,
+        user: req.user,
+        response,
+        ms: Date.now() - start,
+      })
+    }
+  }
+}
+
+/** embed 调用 trace：记录输入文本（截断）与向量数，绝不落向量本体（KB 级浮点）。 */
+class TracingEmbedder implements Embedder {
+  constructor(
+    private readonly inner: Embedder,
+    private readonly file: string,
+  ) {}
+
+  async embed(texts: string[]): Promise<number[][] | null> {
+    const start = Date.now()
+    let vectors: number[][] | null = null
+    try {
+      vectors = await this.inner.embed(texts)
+      return vectors
+    } finally {
+      appendTrace(this.file, {
+        ts: new Date().toISOString(),
+        kind: 'embed',
+        backend: 'ollama-embed',
+        inputs: texts.map(text => (text.length > 200 ? `${text.slice(0, 200)}…` : text)),
+        vectors: vectors === null ? null : vectors.length,
+        ms: Date.now() - start,
+      })
+    }
+  }
+}
+
+/** llmTraceFile 非空时给后端套 trace；空串 / undefined 原样返回（零开销）。 */
+function maybeTraceBackend(backend: LlmBackend, traceFile?: string): LlmBackend {
+  return traceFile ? new TracingBackend(backend, traceFile) : backend
+}
+
+/**
  * Ollama 向量后端（FR-4.1）：POST {host}/api/embed {model, input: string[]} →
  * {embeddings: number[][]}。任何失败（网络 / 非 200 / 异形响应）都返回
  * null，由调用方降级为无向量通道（NFR-2.2），绝不 throw。
@@ -214,11 +300,12 @@ export class OllamaEmbedder implements Embedder {
  */
 export function createEmbedder(config: EmbedConfig): Embedder | null {
   if (!(config.embedEnabled ?? false)) return null
-  return new OllamaEmbedder(
+  const embedder: Embedder = new OllamaEmbedder(
     config.ollamaHost || DEFAULT_OLLAMA_HOST,
     config.embedModel || DEFAULT_EMBED_MODEL,
     config.llmTimeoutMs,
   )
+  return config.llmTraceFile ? new TracingEmbedder(embedder, config.llmTraceFile) : embedder
 }
 
 class ChainBackend implements LlmBackend {
@@ -235,18 +322,19 @@ class ChainBackend implements LlmBackend {
 }
 
 export function createBackend(config: LlmConfig, llm?: LlmStreamLike): LlmBackend {
-  const ollama = new OllamaBackend(
+  const trace = config.llmTraceFile || undefined
+  const ollama = maybeTraceBackend(new OllamaBackend(
     config.ollamaHost || DEFAULT_OLLAMA_HOST,
     config.ollamaModel || DEFAULT_OLLAMA_MODEL,
     config.llmTimeoutMs,
-  )
-  const openai = new OpenAiBackend(
+  ), trace)
+  const openai = maybeTraceBackend(new OpenAiBackend(
     config.openaiBaseUrl ?? '',
     config.openaiApiKey ?? '',
     config.openaiModel ?? '',
     config.llmTimeoutMs,
-  )
-  const main = new MainBackend(llm, config.mainProvider ?? '', config.mainModel ?? '', config.llmTimeoutMs)
+  ), trace)
+  const main = maybeTraceBackend(new MainBackend(llm, config.mainProvider ?? '', config.mainModel ?? '', config.llmTimeoutMs), trace)
 
   switch (config.llmBackend ?? 'auto') {
     case 'off':

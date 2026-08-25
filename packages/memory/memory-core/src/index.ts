@@ -121,6 +121,7 @@ export const Config: z<Config> = z.object({
   mainProvider: z.string().default(''),
   mainModel: z.string().default(''),
   llmTimeoutMs: z.number().default(90_000),
+  llmTraceFile: z.string().default(''),
   sedimentEnabled: z.boolean().default(true),
   sedimentMinChars: z.number().default(240),
   sedimentDailyMax: z.number().default(8),
@@ -215,7 +216,7 @@ export function apply(ctx: Context, config: Config): void {
       store: scope.memoryStore.store,
       llm: llmBackend,
       config,
-      logger: { warn: (msg) => { scope.logger.warn(msg) } },
+      logger: { warn: (msg) => { scope.logger.warn(msg) }, info: (msg) => { scope.logger.info(msg) } },
       embedder,
     })
     // Sleep consolidation (FR-8.1/FR-8.2 ①②④⑤⑦): a self-managed 5-minute poll —
@@ -226,7 +227,7 @@ export function apply(ctx: Context, config: Config): void {
       store: scope.memoryStore.store,
       llm: llmBackend,
       config,
-      logger: { warn: (msg) => { scope.logger.warn(msg) } },
+      logger: { warn: (msg) => { scope.logger.warn(msg) }, info: (msg) => { scope.logger.info(msg) } },
       sedimenter,
       embedder,
     })

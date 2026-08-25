@@ -56,7 +56,8 @@ export interface SedimentDeps {
   store: MemoryStore
   llm: LlmBackend
   config: SedimentConfig
-  logger: { warn(msg: string): void }
+  /** info 可选：沉淀尝试结果等生命周期观测；未提供时只告警。 */
+  logger: { warn(msg: string): void; info?(msg: string): void }
   /** 向量后端（可选）：卡片入库后 detached embed；null 时静默跳过（NFR-2.2）。 */
   embedder?: Embedder | null
 }
@@ -85,6 +86,21 @@ const MAX_RETRIES = 5
 const TAIL_BUDGET = 900
 const MARKER_RE = /^\[(CARD|FACT|COMMITMENT|USER)\]\s*(.*)$/
 const EMO_RE = /^\[emo:([0-9]*\.?[0-9]+)\]\s*/i
+
+const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'] as const
+
+/**
+ * 蒸馏/巩固 prompt 的时间锚点行：本地日期时间 + 星期 + 进程时区。
+ * 提炼模型本身不知道"今天"，没有锚点时"明天下午"之类的相对期限只能
+ * 瞎编（编不出合法 ISO 还会被 routeCommitment 的 Date.parse 静默丢弃）。
+ */
+export function nowLine(now: Date): string {
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+  const time = `${pad(now.getHours())}:${pad(now.getMinutes())}`
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+  return `【当前时间】${date} ${time} 周${WEEKDAYS[now.getDay()]}（${tz}）`
+}
 
 /**
  * Parse the distiller's marked output into routable items. Lines without a
@@ -350,7 +366,7 @@ export class Sedimenter {
 
     this.running = true
     try {
-      return await this.distillAndRoute({
+      const result = await this.distillAndRoute({
         user: extracted.user,
         assistant: extracted.assistant,
         turn,
@@ -360,6 +376,10 @@ export class Sedimenter {
         // cwd，仅作旧结构/测试 double 的回退。未知 cwd → null（全局卡）。
         workspace: sessionWorkspace(session),
       })
+      // 生命周期观测：过了全部门控的尝试才有日志；门控 skip（冷却/去重/日
+      // 上限等常态路径）不刷屏，skip 原因可由 meta 计数键旁证。
+      this.deps.logger.info?.(`memory-core: sediment session=${sessionId ?? 'unknown'} turn=${turn} -> ${result}`)
+      return result
     } catch (error) {
       this.deps.logger.warn(`memory-core: sedimentation failed: ${String(error)}`)
       return 'failed'
@@ -423,13 +443,14 @@ export class Sedimenter {
 
   private buildPrompt(user: string, assistant: string): string {
     return [
+      nowLine(new Date()),
       `【用户说】${user.slice(0, 3000)}`,
       `【你回答】${assistant.slice(0, 3000)}`,
       `【已有记忆尾部，避免重复】${this.memoryTail()}`,
       '输出格式（每行一条）：',
       '[CARD][emo:0.0-1.0] 事件/偏好/状态，一句自包含的话（emo 为情绪强度，越强烈越高）',
       '[FACT] 主体 | 属性 | 值（稳定事实，如 主人 | 职业 | 工程师）',
-      '[COMMITMENT] 你在本轮亲口许下的待办 | ISO期限（没提期限可省略竖线后段）',
+      '[COMMITMENT] 你在本轮亲口许下的待办 | ISO期限（"明天"等相对期限按当前时间换算；没提期限可省略竖线后段）',
       '[USER] 用户画像增量（性格/偏好/背景）',
       '（无）',
     ].join('\n')

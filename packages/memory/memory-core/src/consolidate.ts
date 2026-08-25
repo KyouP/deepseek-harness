@@ -30,7 +30,7 @@
 
 import type { Fact, MemoryStore, NewFact, Note, Suggestion } from '@deepseek-ai/dsh-memory-store'
 import type { Embedder, LlmBackend } from './llm.ts'
-import { parseSedimentOutput, routeSedimentItem } from './sediment.ts'
+import { nowLine, parseSedimentOutput, routeSedimentItem } from './sediment.ts'
 import { autoLink } from './links.ts'
 import { sanitizeForWrite } from './sanitize.ts'
 
@@ -47,6 +47,8 @@ export interface ConsolidateConfig {
 
 export interface ConsolidateLogger {
   warn(msg: string): void
+  /** 可选：巩固触发与报告等生命周期观测；未提供时只告警。 */
+  info?(msg: string): void
 }
 
 /** 沉淀重试队列的结构化最小接口：真实 Sedimenter 兼容，测试手可构。 */
@@ -135,7 +137,14 @@ export class Consolidator {
       const recompiled = await this.recompileHumanBlock()
       const decay = this.settleDecay(now)
       const embedded = await this.backfillEmbeddings()
-      return { distilled, superseded, linked, recompiled, decayed: decay.decayed, archived: decay.archived, embedded }
+      const report: ConsolidateReport = { distilled, superseded, linked, recompiled, decayed: decay.decayed, archived: decay.archived, embedded }
+      // 生命周期观测：每次真实执行留一行报告（tick 未触发时不产生日志）。
+      this.deps.logger.info?.(
+        `memory-core: consolidation report distilled=${report.distilled} superseded=${report.superseded}`
+        + ` linked=${report.linked} recompiled=${report.recompiled} decayed=${report.decayed}`
+        + ` archived=${report.archived} embedded=${report.embedded}`,
+      )
+      return report
     } finally {
       this.running = false
     }
@@ -207,7 +216,7 @@ export class Consolidator {
     if (notes.length === 0) return 0
     let output: string | null
     try {
-      output = await this.deps.llm.complete({ system: DISTILL_SYSTEM, user: this.buildDistillPrompt(notes) })
+      output = await this.deps.llm.complete({ system: DISTILL_SYSTEM, user: this.buildDistillPrompt(notes, now) })
     } catch (error) {
       this.deps.logger.warn(`memory-core: consolidation distill llm call threw: ${String(error)}`)
       return 0
@@ -334,8 +343,8 @@ export class Consolidator {
     return true
   }
 
-  /** notes + recent card summaries (≤5) + 输出格式指令。 */
-  private buildDistillPrompt(notes: Note[]): string {
+  /** notes + 时间锚点 + recent card summaries (≤5) + 输出格式指令。 */
+  private buildDistillPrompt(notes: Note[], now: Date): string {
     const lines = notes.map(note => `- (${note.createdAt}) ${note.text}`).join('\n')
     let summaries: string[] = []
     try {
@@ -344,6 +353,7 @@ export class Consolidator {
       summaries = [] // a closed/broken store degrades the prompt, never the run
     }
     return [
+      nowLine(now),
       `【待蒸馏便签】\n${lines}`,
       `【近期记忆摘要，避免重复】\n${summaries.join('\n') || '（空）'}`,
       '输出格式（每行一条）：',

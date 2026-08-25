@@ -202,6 +202,29 @@ describe('Sedimenter gates', () => {
     expect(await sed.runOnce(makeAgent(longEvents()), 7)).toBe('skipped')
     expect(llm.calls).toBe(1)
   })
+
+  it('distill prompt carries a 当前时间 anchor; attempt result is info-logged', async () => {
+    let seenPrompt = ''
+    const capturing: LlmBackend = {
+      name: 'cap',
+      async complete(req): Promise<string | null> {
+        seenPrompt = req.user
+        return '（无）'
+      },
+    }
+    const info = vi.fn()
+    dir = mkdtempSync(join(tmpdir(), 'hmem-sediment-'))
+    store = openMemoryStore(join(dir, 't.db'))
+    const sed = new Sedimenter({
+      store, llm: capturing,
+      config: { ...CONFIG, sedimentCooldownMinutes: 0 },
+      logger: { warn: vi.fn(), info },
+    })
+    expect(await sed.runOnce(makeAgent(longEvents()), 1)).toBe('empty')
+    // 时间锚点：本地日期时间 + 星期 + 时区，相对期限换算的基准
+    expect(seenPrompt).toMatch(/【当前时间】\d{4}-\d{2}-\d{2} \d{2}:\d{2} 周[日一二三四五六]（.+）/)
+    expect(info).toHaveBeenCalledWith(expect.stringContaining('sediment session=s1 turn=1 -> empty'))
+  })
 })
 
 describe('Sedimenter routing', () => {

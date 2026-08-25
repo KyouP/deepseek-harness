@@ -98,6 +98,31 @@ describe('Consolidator', () => {
     expect(store!.recentNotes(dayAgoIso(), 10).map(note => note.text)).toContain('今天的便签')
   })
 
+  it('distill prompt carries a 当前时间 anchor; run info-logs the report', async () => {
+    let seenPrompt = ''
+    const capturing: LlmBackend = {
+      name: 'cap',
+      async complete(req): Promise<string | null> {
+        seenPrompt = req.user
+        return '（无）'
+      },
+    }
+    const info = vi.fn()
+    dir = mkdtempSync(join(tmpdir(), 'hmem-consolidate-'))
+    store = openMemoryStore(join(dir, 't.db'))
+    const consolidator = new Consolidator({
+      store, llm: capturing, config: CONFIG, logger: { warn: vi.fn(), info },
+    })
+    addNoteBackdated('两天前的便签', 2 * DAY_MS)
+
+    const report = await consolidator.run()
+
+    expect(report.distilled).toBe(0)
+    expect(seenPrompt).toMatch(/【当前时间】\d{4}-\d{2}-\d{2} \d{2}:\d{2} 周[日一二三四五六]（.+）/)
+    expect(info).toHaveBeenCalledWith(expect.stringContaining(
+      'consolidation report distilled=0 superseded=0 linked=0 recompiled=false'))
+  })
+
   it('supersedes duplicate facts keeping the newest', async () => {
     const consolidator = setup(fakeLlm([]))
     const oldFact = store!.insertFact({ subject: '主人', predicate: '职业', object: '设计师' })

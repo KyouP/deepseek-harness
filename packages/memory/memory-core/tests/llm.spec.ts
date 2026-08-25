@@ -1,6 +1,27 @@
 // packages/memory/memory-core/tests/llm.spec.ts
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createBackend, type LlmConfig, type LlmStreamLike } from '../src/llm.ts'
+import { createBackend, createEmbedder, type LlmConfig, type LlmStreamLike } from '../src/llm.ts'
+
+let dir = ''
+afterEach(() => {
+  if (dir) rmSync(dir, { recursive: true, force: true })
+  dir = ''
+})
+
+function traceFile(): string {
+  dir = mkdtempSync(join(tmpdir(), 'hmem-llmtrace-'))
+  return join(dir, 'trace.jsonl')
+}
+
+function readTrace(file: string): Record<string, unknown>[] {
+  return readFileSync(file, 'utf8')
+    .split('\n')
+    .filter(line => line.trim())
+    .map(line => JSON.parse(line) as Record<string, unknown>)
+}
 
 function baseConfig(overrides: LlmConfig = {}): LlmConfig {
   return { llmBackend: 'auto', ...overrides }
@@ -167,5 +188,73 @@ describe('llm backends', () => {
     const b = createBackend(baseConfig({ llmBackend: 'ollama', llmTimeoutMs: 60_000 }))
     expect(await b.complete({ system: 's', user: 'u', maxTokens: 64, timeoutMs: 5_000 })).toBe('ok')
     expect((bodies[0] as { options: { num_predict: number } }).options.num_predict).toBe(64)
+  })
+})
+
+describe('llm trace', () => {
+  it('writes one JSONL record per complete call with prompt, response and ms', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ response: '提炼结果' })))
+    const file = traceFile()
+    const b = createBackend(baseConfig({ llmBackend: 'ollama', llmTraceFile: file }))
+    expect(await b.complete({ system: 'sys', user: 'usr' })).toBe('提炼结果')
+    const records = readTrace(file)
+    expect(records).toHaveLength(1)
+    expect(records[0]).toMatchObject({
+      kind: 'complete', backend: 'ollama', system: 'sys', user: 'usr', response: '提炼结果',
+    })
+    expect(typeof records[0]!.ts).toBe('string')
+    expect(typeof records[0]!.ms).toBe('number')
+  })
+
+  it('auto chain traces each fallback attempt with its own backend name and null response', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (String(url).includes('11434')) throw new Error('ollama down')
+      return jsonResponse({ choices: [{ message: { content: 'from-openai' } }] })
+    }))
+    const file = traceFile()
+    const b = createBackend(baseConfig({
+      llmBackend: 'auto',
+      openaiBaseUrl: 'https://api.example.com/v1',
+      openaiApiKey: 'k',
+      openaiModel: 'm',
+      llmTraceFile: file,
+    }))
+    expect(await b.complete({ system: 's', user: 'u' })).toBe('from-openai')
+    const records = readTrace(file)
+    expect(records.map(r => r.backend)).toEqual(['ollama', 'openai'])
+    expect(records[0]!.response).toBeNull()
+    expect(records[1]!.response).toBe('from-openai')
+  })
+
+  it('an unwritable trace file never breaks the LLM call', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ response: 'ok' })))
+    dir = mkdtempSync(join(tmpdir(), 'hmem-llmtrace-'))
+    const b = createBackend(baseConfig({
+      llmBackend: 'ollama',
+      llmTraceFile: join(dir, 'no-such-dir', 'trace.jsonl'),
+    }))
+    expect(await b.complete({ system: 's', user: 'u' })).toBe('ok')
+  })
+
+  it('embedder trace logs truncated inputs and vector count, never the vectors', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ embeddings: [[0.1, 0.2], [0.3, 0.4]] })))
+    const file = traceFile()
+    const embedder = createEmbedder({ embedEnabled: true, llmTraceFile: file })
+    const long = '长'.repeat(300)
+    expect(await embedder!.embed([long, '短文本'])).toHaveLength(2)
+    const records = readTrace(file)
+    expect(records).toHaveLength(1)
+    expect(records[0]).toMatchObject({ kind: 'embed', backend: 'ollama-embed', vectors: 2 })
+    const inputs = records[0]!.inputs as string[]
+    expect(inputs[0]).toHaveLength(201) // 200 chars + ellipsis
+    expect(inputs[1]).toBe('短文本')
+    expect(JSON.stringify(records[0])).not.toContain('0.1')
+  })
+
+  it('no llmTraceFile configured → nothing written (backend untouched)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ response: 'ok' })))
+    const b = createBackend(baseConfig({ llmBackend: 'ollama' }))
+    expect(b.name).toBe('ollama') // not wrapped
+    expect(await b.complete({ system: 's', user: 'u' })).toBe('ok')
   })
 })
