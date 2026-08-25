@@ -120,7 +120,7 @@ export const Config: z<Config> = z.object({
   openaiModel: z.string().default(''),
   mainProvider: z.string().default(''),
   mainModel: z.string().default(''),
-  llmTimeoutMs: z.number().default(90_000),
+  llmTimeoutMs: z.number().default(300_000),
   llmTraceFile: z.string().default(''),
   sedimentEnabled: z.boolean().default(true),
   sedimentMinChars: z.number().default(240),

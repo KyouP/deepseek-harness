@@ -68,7 +68,9 @@ export interface EmbedConfig extends LlmConfig {
 const DEFAULT_OLLAMA_HOST = 'http://127.0.0.1:11434'
 const DEFAULT_OLLAMA_MODEL = 'qwen3.5:4b'
 const DEFAULT_EMBED_MODEL = 'bge-m3'
-const DEFAULT_TIMEOUT_MS = 90_000
+// 5 分钟：提炼/巩固都是 fire-and-forget 异步路径，长超时不阻塞对话；
+// 给模型冷加载（实测 4B 首载 10s+）、大模型（35B 级）与 CPU 高负载留余量。
+const DEFAULT_TIMEOUT_MS = 300_000
 const DEFAULT_MAX_TOKENS = 1024
 
 function timeoutSignal(req: CompleteRequest, configTimeout?: number): AbortSignal {

@@ -168,7 +168,7 @@ ollama pull bge-m3       # 可选：向量召回通道（embedEnabled=true 时�
 | `ollamaModel` | `'qwen3.5:4b'` | 提炼模型（沉淀/巩固/画像重编译用）。推理模型（Qwen3.x 等）自动以 `think:false` 调用——思考 token 计入 num_predict 且慢一个数量级，提炼任务不需要 |
 | `openaiBaseUrl` / `openaiApiKey` / `openaiModel` | `''` | OpenAI 兼容后端（`auto` 链中 baseUrl 非空才启用） |
 | `mainProvider` / `mainModel` | `''` | 宿主主模型后端（`auto` 链中两者都非空才启用） |
-| `llmTimeoutMs` | `90000` | 单次 LLM 调用超时 |
+| `llmTimeoutMs` | `300000` | 单次 LLM 调用超时（异步路径不阻塞对话，给冷加载/大模型留余量） |
 | `llmTraceFile` | `''`（关闭） | LLM 交互 trace 文件（JSONL）：每次 complete/embed 记录后端名、完整 prompt、响应、耗时，auto 链每路降级尝试各自留痕。观测沉淀/巩固实际触发用；含会话原文，仅测试调试开启 |
 | `sedimentEnabled` | `true` | 温路径自动沉淀总开关 |
 | `sedimentMinChars` | `240` | 参与沉淀的最小回合体量（字符） |
