@@ -169,6 +169,7 @@ ollama pull bge-m3       # 可选：向量召回通道（embedEnabled=true 时�
 | `openaiBaseUrl` / `openaiApiKey` / `openaiModel` | `''` | OpenAI 兼容后端（`auto` 链中 baseUrl 非空才启用） |
 | `mainProvider` / `mainModel` | `''` | 宿主主模型后端（`auto` 链中两者都非空才启用） |
 | `llmTimeoutMs` | `90000` | 单次 LLM 调用超时 |
+| `llmTraceFile` | `''`（关闭） | LLM 交互 trace 文件（JSONL）：每次 complete/embed 记录后端名、完整 prompt、响应、耗时，auto 链每路降级尝试各自留痕。观测沉淀/巩固实际触发用；含会话原文，仅测试调试开启 |
 | `sedimentEnabled` | `true` | 温路径自动沉淀总开关 |
 | `sedimentMinChars` | `240` | 参与沉淀的最小回合体量（字符） |
 | `sedimentDailyMax` | `8` | 每日沉淀尝试上限（NFR-1.5 成本控制） |
@@ -202,6 +203,12 @@ ollama pull bge-m3       # 可选：向量召回通道（embedEnabled=true 时�
 
 - `docs/hmem-功能测试清单与方案.md` —— 全量 master 清单：15 个工具逐一 + 全部自动机制 + 降级路径，含加速技巧与 SQL 验证方法
 - `docs/hmem-v1-功能测试指南.md` —— 分阶段 walkthrough：边聊边观察的操作剧本（v1 阶段 1-7 + v2 阶段 8-15）
+
+**观测自动机制的三个手段**（测试时建议配合）：
+
+1. **dsh 日志（info 级）**：每次沉淀尝试结果（`sediment session=… turn=… -> stored/empty/failed`）与每轮巩固报告（`consolidation report distilled=… archived=…`）都会进 dsh 日志；门控 skip 是常态路径不打日志（原因可由 meta 计数键旁证）。
+2. **`llmTraceFile`**：配置后所有 LLM 调用（沉淀/巩固/画像重编译/embedding）的完整 prompt 与响应落 JSONL，auto 链每路降级尝试各自一条。
+3. **时间感知**：dsh 自带的 `@deepseek-ai/dsh-time-context` 插件默认不挂载；挂上后模型每步都能拿到当前时间/时区（默认组合之外需在 profile patch 手动加，见测试清单文档 §2）。沉淀/巩固蒸馏 prompt 已内置【当前时间】锚点，相对期限（"明天"）会按它换算。
 
 ## 数据在哪、怎么管
 

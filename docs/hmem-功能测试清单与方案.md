@@ -54,6 +54,24 @@ SELECT key, value FROM meta;                                                    
 
 关键 meta 键：`activity:last`（巩固空闲水位，每轮打点）、`sediment:last`（上次沉淀）、`sediment:count:YYYY-MM-DD`（当日沉淀尝试计数，本地日期）、`decay:last`（衰减结算水位）、`review:turns` / `review:due`（审查计数/到期标记）。
 
+#### 观测自动机制（沉淀/巩固/LLM 交互）
+
+自动机制默认"静默"，测试时用这三个手段让它可见：
+
+1. **dsh 日志（info 级，零配置）**：每次过了门控的沉淀尝试都会记录 `memory-core: sediment session=… turn=… -> stored/empty/failed`；每轮巩固记录 `memory-core: consolidation report distilled=… superseded=… linked=… recompiled=… decayed=… archived=… embedded=…`。门控 skip（冷却/日上限/去重/子代理等常态路径）不打日志——没看到 attempt 日志时按 §3 的 meta 键逐项排查门控。
+2. **`llmTraceFile`（LLM 交互全量留痕）**：memory-core config 加 `llmTraceFile: 'F:\\dsh_workspace\\sub_dsh_workspace\\hmem-trace.jsonl'` 后，每次 complete/embed 调用落一行 JSONL：`{ts, kind, backend, system, user, response, ms}`（embed 记录截断输入与向量数，不落向量本体）。`auto` 链每路降级尝试各自一条（`backend: ollama/openai/main`，`response: null` 表示该路失败走了下一路）。**含会话原文，仅测试期开启**；trace 文件不可写时静默跳过，不影响功能。配合 `Get-Content hmem-trace.jsonl -Wait -Tail 5` 实时跟踪。
+3. **模型时间感知（time-context 插件）**：dsh 默认组合**不挂载** `@deepseek-ai/dsh-time-context`，对话中的模型不知道当前时间（会把日期搞错）。在 profile 的 `cordis.patch.yml` 追加（web profile 已配好）：
+
+   ```yaml
+   - id: time-context
+     name: '@deepseek-ai/dsh-time-context'
+     config:
+       timeZone: Asia/Shanghai
+       refreshIntervalMs: 60000   # 60 秒内不重复注入
+   ```
+
+   挂载后每个 step 向历史注入当前时间/时区/距上条消息时长。另外沉淀/巩固的蒸馏 prompt 已内置【当前时间】锚点（本地时间+星期+时区），`[COMMITMENT]` 的相对期限（"明天"）由它换算成 ISO——这条不依赖 time-context，始终生效。
+
 ### 3. 加速技巧汇总（不用干等）
 
 | 要测的机制 | 加速方法（退出 dsh 后改库，重启生效） |
