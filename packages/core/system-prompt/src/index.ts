@@ -236,7 +236,7 @@ export function renderContextSnapshot(assembly: PromptAssembly): string {
 export function joinContextSections(sections: readonly ContextSnapshotSection[]): string {
   const body = sections.map(section => section.text).join('\n\n')
   if (body.length === 0) return ''
-  return `Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\n${body}`
+  return `当前运行时上下文。本快照取代先前的所有运行时上下文快照。\n\n${body}`
 }
 
 /**

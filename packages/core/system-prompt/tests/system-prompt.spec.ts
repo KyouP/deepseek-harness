@@ -97,7 +97,7 @@ describe('SystemPrompt', () => {
     expect(assembly.tools).toEqual([{ name: 'echo', description: 'echo back', parameters: {} }])
     expect(assembly.variables).toEqual({})
     expect(renderPrompt(assembly)).toBe(`${IDENTITY}\n\nYou are DeepSeek Harness.\n\nBe precise.\n\ncwd: /tmp`)
-    expect(renderContextSnapshot(assembly)).toBe('Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\ncontext 1\n\ncontext 2')
+    expect(renderContextSnapshot(assembly)).toBe('当前运行时上下文。本快照取代先前的所有运行时上下文快照。\n\ncontext 1\n\ncontext 2')
   })
 
   it('resolves section text providers against the assemble context, at each assemble call', async () => {
@@ -353,7 +353,7 @@ describe('SystemPrompt', () => {
     ctx.systemPrompt.variable('mode', () => 'read-only')
     ctx.systemPrompt.context({ name: 'policy', order: 1, text: 'Mode: {{mode}}.' })
     expect(renderContextSnapshot(await ctx.systemPrompt.assemble()))
-      .toBe('Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nMode: read-only.')
+      .toBe('当前运行时上下文。本快照取代先前的所有运行时上下文快照。\n\nMode: read-only.')
   })
 
   it('attributes context interpolation failures to the contributing context', () => {

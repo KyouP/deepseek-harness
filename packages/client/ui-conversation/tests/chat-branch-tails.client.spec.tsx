@@ -590,7 +590,7 @@ describe('MessageItem arms', () => {
       <MessageItem t={t} node={{
         kind: 'context',
         seq: 3,
-        content: [{ type: 'text', text: 'Current runtime context.\n\nsandbox\n\nworkspace' }],
+        content: [{ type: 'text', text: '当前运行时上下文。\n\nsandbox\n\nworkspace' }],
         source: {
           kind: 'plugin',
           plugin: '@deepseek-ai/dsh-system-prompt',
@@ -667,7 +667,7 @@ describe('MessageItem arms', () => {
   it('a snapshot states the supersession its framing line carries', () => {
     const view = render(
       <MessageItem t={t} node={{
-        kind: 'context', seq: 3, content: [{ type: 'text', text: 'Current runtime context.' }],
+        kind: 'context', seq: 3, content: [{ type: 'text', text: '当前运行时上下文。' }],
         source: { kind: 'plugin', form: 'snapshot', sections: [{ name: 'sandbox', text: 'w' }] },
         provenance: { role: 'inject', label: 'plugin' },
         form: 'snapshot',

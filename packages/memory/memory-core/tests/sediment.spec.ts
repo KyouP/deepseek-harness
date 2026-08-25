@@ -131,12 +131,12 @@ describe('extractLastTurn', () => {
       { type: 'user/message', data: { content: '我鼻炎该挂什么科' }, seq: 1 },
       {
         type: 'user/message',
-        data: { content: 'Current runtime context…承诺…', source: { kind: 'plugin', plugin: 'system-prompt', form: 'snapshot' } },
+        data: { content: '当前运行时上下文…承诺…', source: { kind: 'plugin', plugin: 'system-prompt', form: 'snapshot' } },
         seq: 2,
       },
       {
         type: 'user/message',
-        data: { content: 'Time sampled while preparing turn 3, step 1…', source: { kind: 'plugin', plugin: 'time-context', form: 'snapshot' } },
+        data: { content: '准备第 3 轮第 1 步时采样的时间…', source: { kind: 'plugin', plugin: 'time-context', form: 'snapshot' } },
         seq: 3,
       },
       { type: 'assistant/chunk', data: { chunk: { type: 'text-delta', text: '挂耳鼻喉科' } }, seq: 4 },
@@ -148,7 +148,7 @@ describe('extractLastTurn', () => {
     expect(extractLastTurn([
       {
         type: 'user/message',
-        data: { content: 'Time sampled…', source: { kind: 'plugin', plugin: 'time-context' } },
+        data: { content: '时间读数…', source: { kind: 'plugin', plugin: 'time-context' } },
         seq: 1,
       },
       { type: 'assistant/chunk', data: { chunk: { type: 'text-delta', text: '答' } }, seq: 2 },

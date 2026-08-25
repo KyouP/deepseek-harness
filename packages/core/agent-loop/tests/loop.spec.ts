@@ -378,7 +378,7 @@ describe('agent loop', () => {
     expect(contextEvents()).toHaveLength(1)
     expect(contextEvents()[0]?.data.content).toEqual([{
       type: 'text',
-      text: 'Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nMode: read-only.',
+      text: '当前运行时上下文。本快照取代先前的所有运行时上下文快照。\n\nMode: read-only.',
     }])
 
     send(agent, 'unchanged')
@@ -400,7 +400,7 @@ describe('agent loop', () => {
     expect(contextEvents()).toHaveLength(3)
     expect(contextEvents()[2]?.data.content).toEqual([{
       type: 'text',
-      text: 'Current runtime context: none. Earlier runtime-context snapshots no longer apply.',
+      text: '当前运行时上下文：无。先前的运行时上下文快照不再适用。',
     }])
 
     send(agent, 'still clear')
@@ -474,7 +474,7 @@ describe('agent loop', () => {
       && message.source.plugin === '@deepseek-ai/dsh-system-prompt')
     expect(clearing?.content).toEqual([{
       type: 'text',
-      text: 'Current runtime context: none. Earlier runtime-context snapshots no longer apply.',
+      text: '当前运行时上下文：无。先前的运行时上下文快照不再适用。',
     }])
   })
 
@@ -522,7 +522,7 @@ describe('agent loop', () => {
     expect(runtimeContexts).toHaveLength(2)
     expect(runtimeContexts[1]?.data.content).toEqual([{
       type: 'text',
-      text: 'Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nMode: read-only.',
+      text: '当前运行时上下文。本快照取代先前的所有运行时上下文快照。\n\nMode: read-only.',
     }])
   })
 
