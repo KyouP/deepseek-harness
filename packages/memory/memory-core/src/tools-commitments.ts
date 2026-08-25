@@ -7,7 +7,26 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import type { MemoryStore } from '@deepseek-ai/dsh-memory-store'
 import type { MemoryStoreService } from './service.ts'
+
+/**
+ * Resolve a commitment id or unique id prefix against the ACTIVE commitments
+ * (closing already-closed ones is an error either way). The injected
+ * commitment list shows 8-char prefixes, so the model quotes prefixes, not
+ * full uuids. Throws on no match or an ambiguous prefix.
+ */
+function resolveCommitmentId(store: MemoryStore, input: string): string {
+  const actives = store.activeCommitments()
+  if (actives.some(c => c.id === input)) return input
+  const matches = actives.filter(c => c.id.startsWith(input))
+  const [only] = matches
+  if (matches.length === 1 && only !== undefined) return only.id
+  if (matches.length > 1) {
+    throw new Error(`id prefix "${input}" matches ${matches.length} active commitments; use a longer prefix`)
+  }
+  throw new Error(`no active commitment with id ${input}`)
+}
 
 /**
  * Register the commitment/pin tools: `memory_close_commitment`, `memory_pin`,
@@ -22,9 +41,10 @@ export function registerCommitmentTools(ctx: Context, service: MemoryStoreServic
       + '(type: commitment). Call ONLY when the user confirmed the promise is fulfilled '
       + 'or when it is cancelled — never close on your own guess. Closed commitments '
       + 'stop appearing in the injected commitment list. Closing an already-closed or '
-      + 'unknown commitment is an error.',
+      + 'unknown commitment is an error. The injected commitment list shows each id\'s '
+      + '8-char prefix in [brackets] — quoting the prefix is enough.',
     parameters: {
-      id: { type: 'string', required: true, description: 'The commitment id.' },
+      id: { type: 'string', required: true, description: 'The commitment id or its unique prefix (as shown in [brackets] in the injected list).' },
       status: {
         type: 'string', enum: ['done', 'cancelled'],
         description: 'done (default) when fulfilled, cancelled when dropped.',
@@ -46,8 +66,9 @@ export function registerCommitmentTools(ctx: Context, service: MemoryStoreServic
     },
     execute(args) {
       const status = args.status ?? 'done'
-      service.store.closeCommitment(args.id, status)
-      return Promise.resolve({ closed: true, id: args.id, status })
+      const id = resolveCommitmentId(service.store, args.id)
+      service.store.closeCommitment(id, status)
+      return Promise.resolve({ closed: true, id, status })
     },
     presentCall: args => ({ card: 'generic', title: 'Close commitment', kind: 'other', rawInput: args }),
   }))

@@ -38,7 +38,7 @@ export const inject = ['systemPrompt', 'tools']
  */
 export const MEMORY_DISCIPLINE = [
   '记忆系统：你的长期记忆由 memory 系列工具支撑，每轮对话结束后会自动沉淀要点，无需每轮手动保存。',
-  '用户明确要求「记住/别忘了」时，仍应调用 memory_store（type=memory）。亲口许下待办时用 type=commitment，完成后用 memory_close_commitment 闭环。',
+  '用户明确要求「记住/别忘了」时，仍应调用 memory_store（type=memory）。亲口许下待办时用 type=commitment，完成后用 memory_close_commitment 闭环（id 用承诺注入行 [方括号] 里的短前缀即可）；改期 = 闭环旧承诺 + 新记一条。',
   '回忆往事优先 memory_recall（一两个特征关键词），命中后用 memory_expand 看全文；翻更早的会话原文用 memory_browse。',
 ].join('\n')
 

@@ -50,7 +50,9 @@ export function buildCommitmentsText(store: MemoryStore, rowCap = DEFAULT_COMMIT
   const lines = rows.map((c) => {
     const overdue = c.dueAt !== null && c.dueAt <= nowIso
     const label = c.dueAt ? dueLabel(c.dueAt, now) : ''
-    return `- ${overdue ? '【到期，请主动提起】' : ''}${c.content}${c.dueAt ? `（期限 ${c.dueAt}${label ? `，${label}` : ''}）` : ''}`
+    // id 短前缀：模型闭环/改期时 memory_close_commitment 直接引用（工具支持前缀解析），
+    // 否则注入里只看得见内容、拿不到 id（2026-08-25 实测模型因此无法自行闭环）。
+    return `- [${c.id.slice(0, 8)}] ${overdue ? '【到期，请主动提起】' : ''}${c.content}${c.dueAt ? `（期限 ${c.dueAt}${label ? `，${label}` : ''}）` : ''}`
   })
   return `${todayHeader(now)}。你承诺过的事（务必逐条闭环；到期项要主动提起）：\n${lines.join('\n')}`
 }

@@ -68,6 +68,29 @@ describe('commitment + pin tools', () => {
       .rejects.toThrow('no active commitment with id nope')
   })
 
+  it('memory_close_commitment resolves a unique id prefix (as shown in the injection)', async () => {
+    const c = store.addCommitment({ content: '前缀闭环' })
+    const out = await tools.get('memory_close_commitment')!
+      .execute({ id: c.id.slice(0, 8), status: 'done' }, exec) as { closed: boolean; id: string }
+    expect(out.closed).toBe(true)
+    expect(out.id).toBe(c.id) // 返回解析后的完整 id
+    expect(store.activeCommitments()).toHaveLength(0)
+  })
+
+  it('prefix resolution rejects ambiguous and unknown prefixes', async () => {
+    // 手插两条同前缀 id，制造歧义
+    store.db.prepare("INSERT INTO commitments (id, content, promisee, due_at, status, created_at, closed_at) VALUES ('aaaaaaa1-0000-4000-8000-000000000001', '甲', 'user', NULL, 'active', '2026-01-01T00:00:00Z', NULL)").run()
+    store.db.prepare("INSERT INTO commitments (id, content, promisee, due_at, status, created_at, closed_at) VALUES ('aaaaaaa2-0000-4000-8000-000000000002', '乙', 'user', NULL, 'active', '2026-01-01T00:00:00Z', NULL)").run()
+    await expect(tools.get('memory_close_commitment')!.execute({ id: 'aaaaaaa', status: 'done' }, exec))
+      .rejects.toThrow('matches 2 active commitments')
+    // 更长前缀消歧后成功
+    const out = await tools.get('memory_close_commitment')!
+      .execute({ id: 'aaaaaaa1', status: 'cancelled' }, exec) as { id: string }
+    expect(out.id).toBe('aaaaaaa1-0000-4000-8000-000000000001')
+    await expect(tools.get('memory_close_commitment')!.execute({ id: 'bbbbbbbb', status: 'done' }, exec))
+      .rejects.toThrow('no active commitment with id bbbbbbbb')
+  })
+
   it('memory_pin / memory_unpin flip pinned on a card', async () => {
     const card = store.insertCard({ summary: 's', content: 'c' })
     expect(store.getCard(card.id)?.pinned).toBe(false)

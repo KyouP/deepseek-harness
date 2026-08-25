@@ -187,13 +187,15 @@ describe('buildCommitmentsText', () => {
     const now = new Date(2026, 7, 25, 13, 30) // 2026-08-25 周二 13:30 本地
     const store = ctx.memoryStore.store
     // 存储文本残留昨日框架（"明天（2026-08-25）…"）：注入层必须就地消歧
-    store.addCommitment({ content: '明天（2026-08-25）下午 3 点提醒主人多喝水', dueAt: new Date(2026, 7, 25, 15, 0).toISOString() })
+    const water = store.addCommitment({ content: '明天（2026-08-25）下午 3 点提醒主人多喝水', dueAt: new Date(2026, 7, 25, 15, 0).toISOString() })
     store.addCommitment({ content: '后天交周报', dueAt: new Date(2026, 7, 27, 9, 0).toISOString() })
     const text = buildCommitmentsText(store, 20, now)
     expect(text).toContain('今天是 2026-08-25（周二）')
     expect(text).toContain('提醒主人多喝水（期限 ')
     expect(text).toContain('，今天 15:00）')
     expect(text).toContain('，后天）')
+    // id 短前缀：模型可引用它调用 memory_close_commitment（工具支持前缀解析）
+    expect(text).toContain(`[${water.id.slice(0, 8)}] 明天（2026-08-25）下午 3 点提醒主人多喝水`)
     await fiber.dispose()
   })
 

@@ -126,8 +126,8 @@ export class Preheat {
         return `（期限 ${c.dueAt}${rel ? `，${rel}` : ''}）`
       }
       const lines = [
-        ...overdue.map(c => `- 【已到期】${c.content}${label(c)}`),
-        ...dueSoon.map(c => `- ${c.content}${label(c)}`),
+        ...overdue.map(c => `- 【已到期】[${c.id.slice(0, 8)}] ${c.content}${label(c)}`),
+        ...dueSoon.map(c => `- [${c.id.slice(0, 8)}] ${c.content}${label(c)}`),
       ]
       sections.push(`临期/到期承诺（进入会话时主动提起）：\n${lines.join('\n')}`)
     }
