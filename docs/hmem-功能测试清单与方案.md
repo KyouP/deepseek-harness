@@ -63,14 +63,17 @@ SELECT key, value FROM meta;                                                    
 3. **模型时间感知（time-context 插件）**：dsh 默认组合**不挂载** `@deepseek-ai/dsh-time-context`，对话中的模型不知道当前时间（会把日期搞错）。在 profile 的 `cordis.patch.yml` 追加（web profile 已配好）：
 
    ```yaml
-   - id: time-context
-     name: '@deepseek-ai/dsh-time-context'
-     config:
-       timeZone: Asia/Shanghai
-       refreshIntervalMs: 60000   # 60 秒内不重复注入
+   # 新增插件必须用 insert 列表——裸 `- id:` 条目是"按 id 覆写已有行"，
+   # 对未挂载的插件是静默 no-op（2026-08-25 踩坑实证）
+   - insert:
+       - id: time-context
+         name: '@deepseek-ai/dsh-time-context'
+         config:
+           timeZone: Asia/Shanghai
+           refreshIntervalMs: 60000   # 60 秒内不重复注入
    ```
 
-   挂载后每个 step 向历史注入当前时间/时区/距上条消息时长。另外沉淀/巩固的蒸馏 prompt 已内置【当前时间】锚点（本地时间+星期+时区），`[COMMITMENT]` 的相对期限（"明天"）由它换算成 ISO——这条不依赖 time-context，始终生效。
+   挂载后每个 step 向历史注入当前时间/时区/距上条消息时长（验证方法：解压最新会话的 session.jsonl.zstd，`grep -c "Time sampled"` 应 >0）。另外沉淀/巩固的蒸馏 prompt 已内置【当前时间】锚点（本地时间+星期+时区），`[COMMITMENT]` 的相对期限（"明天"）由它换算成 ISO——这条不依赖 time-context，始终生效。
 
 ### 3. 加速技巧汇总（不用干等）
 
