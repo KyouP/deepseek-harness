@@ -3,7 +3,7 @@
 > **导引**：本文是**分阶段 walkthrough**——按阶段编排的边聊边观察操作剧本，适合第一遍顺着手动过一遍。若要**全量逐项核对**（15 个工具逐一、全部自动机制、降级路径、加速技巧与 SQL 验证方法），见 master 清单 `docs/hmem-功能测试清单与方案.md`；两份文档互补，清单项会回引本文的阶段号。
 
 > 适用版本：`worktree-hmem-v1` 分支（v2 已合入，tag `hmem-v2.0.0`）
-> 测试对象：已安装到 `F:\dsh_workspace\.dsh-home` 的 web / tui 两个 profile 的记忆插件
+> 测试对象：已安装到 `F:\dsh_workspace\.dsh` 的 web / tui 两个 profile 的记忆插件
 > 测试方式：与 dsh 中的模型**用自然语言对话**，模型会自动调用记忆工具；你只需观察行为是否符合预期
 > 结构：第一~七阶段为 v1 基础功能（全部仍然适用）；**第八阶段起为 v2 新增功能**
 
@@ -12,7 +12,7 @@
 ## 测试前准备（只做一次）
 
 ```powershell
-$env:DSH_HOME = 'F:\dsh_workspace\.dsh-home'   # 每次新开终端都要设，禁设永久变量
+$env:DSH_HOME = 'F:\dsh_workspace\.dsh'   # 每次新开终端都要设，禁设永久变量
 cd F:\dsh_workspace\deepseek-harness
 ```
 
@@ -25,9 +25,9 @@ pnpm dsh --profile web    # 或：pnpm dsh --profile tui
 **启动观察点（测试 0）：**
 
 - [ ] dsh 正常启动，无红色报错
-- [ ] 日志中**没有** `memory-core` 相关的 warning（有 warning 说明数据库打开失败，进入降级模式，先排查再继续）
+- [ ] 日志中**没有** `mem-enhance` 相关的 warning（有 warning 说明数据库打开失败，进入降级模式，先排查再继续）
 
-> 建议：先用一个全新的 hmem.db 测一遍（删除 `F:\dsh_workspace\.dsh-home\storages\hmem.db` 后启动），最后再测「已有数据的持久性」。
+> 建议：先用一个全新的 hmem.db 测一遍（删除 `F:\dsh_workspace\.dsh\storages\hmem.db` 后启动），最后再测「已有数据的持久性」。
 
 ---
 
@@ -163,7 +163,7 @@ pnpm dsh --profile web    # 或：pnpm dsh --profile tui
 
 **通过标准**：
 - [ ] dsh **正常启动**，对话功能完全可用
-- [ ] 日志有一条 memory-core 的 warning（打不开数据库）
+- [ ] 日志有一条 mem-enhance 的 warning（打不开数据库）
 - [ ] 对话中模型没有记忆能力，但其余一切正常
 - [ ] 恢复：退出 dsh，删掉垃圾文件，`hmem.db.bak` 改回原名，重启后记忆完整回来
 
@@ -218,7 +218,7 @@ pnpm dsh --profile web    # 或：pnpm dsh --profile tui
 
 ```powershell
 # 把"最后活动时间"改到 1 小时前，让巩固立刻够格触发
-node -e "const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('F:/dsh_workspace/.dsh-home/storages/hmem.db');db.prepare(\"UPDATE meta SET value=? WHERE key='activity:last'\").run(new Date(Date.now()-3600e3).toISOString())"
+node -e "const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('F:/dsh_workspace/.dsh/storages/hmem.db');db.prepare(\"UPDATE meta SET value=? WHERE key='activity:last'\").run(new Date(Date.now()-3600e3).toISOString())"
 ```
 
 重启 dsh，等 5 分钟内一轮 tick，然后直查验证：
@@ -314,7 +314,7 @@ node -e "const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('F
 
 ```powershell
 # 在任意目录，node -e 直查（退出 dsh 后再查，避免 WAL 锁）
-node -e "const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('F:/dsh_workspace/.dsh-home/storages/hmem.db');console.log(db.prepare('SELECT id,summary,pinned,archived FROM cards').all())"
+node -e "const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('F:/dsh_workspace/.dsh/storages/hmem.db');console.log(db.prepare('SELECT id,summary,pinned,archived FROM cards').all())"
 ```
 
 常用查询：
@@ -330,7 +330,7 @@ SELECT created_at, text FROM scratchpad ORDER BY created_at DESC;  -- 便签
 **加速到期测试**：把承诺的 `due_at` 改为过去时间——
 
 ```powershell
-node -e "const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('F:/dsh_workspace/.dsh-home/storages/hmem.db');db.prepare(\"UPDATE commitments SET due_at='2020-01-01T00:00:00Z' WHERE status='active'\").run()"
+node -e "const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('F:/dsh_workspace/.dsh/storages/hmem.db');db.prepare(\"UPDATE commitments SET due_at='2020-01-01T00:00:00Z' WHERE status='active'\").run()"
 ```
 
 ## 附录 B：常见问题
@@ -339,5 +339,5 @@ node -e "const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('F
 |---|---|
 | 模型从不主动记东西 | v2 起每轮结束会自动沉淀（需 Ollama 在线）。若 Ollama 没起，沉淀静默跳过，退化为 v1 的纯显式模式——见第八阶段 |
 | 中文检索不命中 | v2 已用 trigram 分词解决句中词命中；仍不命中时换特征关键词重试 |
-| 日志有 `memory-core` warning | 数据库打不开（路径/权限/损坏），记忆功能整体降级，见测试 6.2 |
+| 日志有 `mem-enhance` warning | 数据库打不开（路径/权限/损坏），记忆功能整体降级，见测试 6.2 |
 | 改了 memory 代码没生效 | 需要在仓库重新 `pnpm build:lib:host`（插件入口是 `lib/index.js`），无需重装 profile |
