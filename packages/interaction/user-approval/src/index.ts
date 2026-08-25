@@ -97,9 +97,9 @@ export type ApprovalPolicy = 'ask' | 'never'
 export const APPROVAL_POLICIES: readonly ApprovalPolicy[] = ['ask', 'never']
 
 /** Model-facing statement for the deterministic `'never'` policy. */
-const NEVER_SENTENCE = 'Approval prompts are disabled in this session: actions that require approval are rejected automatically — do not request sandbox escalation (do not set `sandbox_permissions`).'
+const NEVER_SENTENCE = '本会话已禁用审批询问：需要审批的操作会被自动拒绝——不要请求沙箱提权（不要设置 `sandbox_permissions`）。'
 /** Model-facing statement for an interactive policy that may still fail closed. */
-const ASK_SENTENCE = 'Approval policy: ask. Operations that require approval may ask through the configured answerers; without an available answerer, the request fails closed.'
+const ASK_SENTENCE = '审批策略：ask（询问）。需要审批的操作可能通过已配置的应答方发起询问；没有可用应答方时，请求按拒绝处理（fail-closed）。'
 
 /**
  * The session's approval-policy override: the last `approval/policy` event in

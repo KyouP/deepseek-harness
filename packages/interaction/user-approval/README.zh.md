@@ -23,13 +23,13 @@
 ##### Ask 策略贡献
 
 ```markdown
-Approval policy: ask. Operations that require approval may ask through the configured answerers; without an available answerer, the request fails closed.
+审批策略：ask（询问）。需要审批的操作可能通过已配置的应答方发起询问；没有可用应答方时，请求按拒绝处理（fail-closed）。
 ```
 
 ##### Never 策略贡献
 
 ```markdown
-Approval prompts are disabled in this session: actions that require approval are rejected automatically — do not request sandbox escalation (do not set `sandbox_permissions`).
+本会话已禁用审批询问：需要审批的操作会被自动拒绝——不要请求沙箱提权（不要设置 `sandbox_permissions`）。
 ```
 
 #### Token 影响
