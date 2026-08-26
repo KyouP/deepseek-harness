@@ -1,0 +1,267 @@
+// packages/dsh-mem-enhance/tests/consolidate.spec.ts
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { openMemoryStore, type MemoryStore } from '../src/store/index.ts'
+import type { LlmBackend } from '../src/llm.ts'
+import { Consolidator, type ConsolidateConfig, type SedimentRetrier } from '../src/consolidate.ts'
+
+let dir = ''
+let store: MemoryStore | undefined
+afterEach(() => {
+  store?.close()
+  store = undefined
+  if (dir) rmSync(dir, { recursive: true, force: true })
+  dir = ''
+})
+
+const CONFIG: ConsolidateConfig = { consolidateIdleMinutes: 30 }
+
+const logger = { warn: vi.fn() }
+
+const DAY_MS = 24 * 3600_000
+
+function setup(
+  llm: LlmBackend,
+  config: ConsolidateConfig = CONFIG,
+  sedimenter?: SedimentRetrier,
+): Consolidator {
+  dir = mkdtempSync(join(tmpdir(), 'hmem-consolidate-'))
+  store = openMemoryStore(join(dir, 't.db'))
+  return new Consolidator({ store, llm, config, logger, sedimenter })
+}
+
+function fakeLlm(outputs: (string | null)[]): LlmBackend & { calls: number } {
+  let i = 0
+  const backend = {
+    name: 'fake',
+    calls: 0,
+    async complete(): Promise<string | null> {
+      backend.calls++
+      const out = outputs[Math.min(i, outputs.length - 1)] ?? null
+      i++
+      return out
+    },
+  }
+  return backend
+}
+
+const NULL_LLM: LlmBackend = {
+  name: 'null',
+  async complete(): Promise<string | null> {
+    return null
+  },
+}
+
+/** Notes are stamped with `new Date()` on insert; backdate via the test-only db handle. */
+function addNoteBackdated(text: string, ageMs: number): void {
+  store!.addNote(null, text)
+  const iso = new Date(Date.now() - ageMs).toISOString()
+  store!.db.prepare('UPDATE scratchpad SET created_at = ? WHERE text = ?').run(iso, text)
+}
+
+function weekAgoIso(): string {
+  return new Date(Date.now() - 7 * DAY_MS).toISOString()
+}
+
+function dayAgoIso(): string {
+  return new Date(Date.now() - DAY_MS).toISOString()
+}
+
+/** Cards are stamped with `new Date()` on insert; backdate via the test-only db handle. */
+function backdateCard(id: string, ageMs: number): void {
+  store!.db.prepare('UPDATE cards SET recorded_at = ? WHERE id = ?')
+    .run(new Date(Date.now() - ageMs).toISOString(), id)
+}
+
+describe('Consolidator', () => {
+  it('distills old notes into cards then deletes them', async () => {
+    // emo 1.0 + 同内容 suggestion hits=2 → s≈0.733 ≥ 0.7 → store 档（Task 16 门控）
+    const llm = fakeLlm(['[CARD][emo:1.0] 主人怕吵'])
+    const retryPending = vi.fn(async () => {})
+    const consolidator = setup(llm, CONFIG, { retryPending })
+    store!.addSuggestion({ kind: 'card', content: '主人怕吵' })
+    store!.addSuggestion({ kind: 'card', content: '主人怕吵' })
+    addNoteBackdated('便签一：楼下装修很吵', 2 * DAY_MS)
+    addNoteBackdated('便签二：主人抱怨噪音', 2 * DAY_MS)
+    addNoteBackdated('便签三：想买耳塞', 2 * DAY_MS)
+    store!.addNote(null, '今天的便签')
+
+    const report = await consolidator.run()
+
+    expect(retryPending).toHaveBeenCalledTimes(1)
+    expect(report.distilled).toBe(1)
+    expect(store!.recentCards(5).map(card => card.summary)).toContain('主人怕吵')
+    // 24h 前的旧便签清空，24h 内的便签保留
+    expect(store!.notesBetween(weekAgoIso(), dayAgoIso())).toHaveLength(0)
+    expect(store!.recentNotes(dayAgoIso(), 10).map(note => note.text)).toContain('今天的便签')
+  })
+
+  it('distill prompt carries a 当前时间 anchor; run info-logs the report', async () => {
+    let seenPrompt = ''
+    let seenSystem = ''
+    const capturing: LlmBackend = {
+      name: 'cap',
+      async complete(req): Promise<string | null> {
+        seenPrompt = req.user
+        seenSystem = req.system
+        return '（无）'
+      },
+    }
+    const info = vi.fn()
+    dir = mkdtempSync(join(tmpdir(), 'hmem-consolidate-'))
+    store = openMemoryStore(join(dir, 't.db'))
+    const consolidator = new Consolidator({
+      store, llm: capturing, config: CONFIG, logger: { warn: vi.fn(), info },
+    })
+    addNoteBackdated('两天前的便签', 2 * DAY_MS)
+
+    const report = await consolidator.run()
+
+    expect(report.distilled).toBe(0)
+    expect(seenPrompt).toMatch(/【当前时间】\d{4}-\d{2}-\d{2} \d{2}:\d{2} 周[日一二三四五六]（.+）/)
+    expect(seenSystem).toContain('禁止出现「今天/今晚/明天/下周」等相对时间词')
+    expect(info).toHaveBeenCalledWith(expect.stringContaining(
+      'consolidation report distilled=0 superseded=0 linked=0 recompiled=false'))
+  })
+
+  it('supersedes duplicate facts keeping the newest', async () => {
+    const consolidator = setup(fakeLlm([]))
+    const oldFact = store!.insertFact({ subject: '主人', predicate: '职业', object: '设计师' })
+    const oldIso = new Date(Date.now() - 2 * DAY_MS).toISOString()
+    store!.db.prepare('UPDATE facts SET recorded_at = ? WHERE id = ?').run(oldIso, oldFact.id)
+    store!.insertFact({ subject: '主人', predicate: '职业', object: '工程师' })
+    // 无关事实不受影响
+    store!.insertFact({ subject: '主人', predicate: '城市', object: '上海' })
+
+    const report = await consolidator.run()
+
+    expect(report.superseded).toBe(1)
+    // 只有新值留在 active 集里
+    const active = store!.activeFacts('主人').filter(fact => fact.predicate === '职业')
+    expect(active.length).toBeGreaterThan(0)
+    expect(new Set(active.map(fact => fact.object))).toEqual(new Set(['工程师']))
+    // 旧行 superseded_by 链到一条 active 的、取值最新的行
+    const all = store!.dump().facts
+    const retired = all.find(fact => fact.id === oldFact.id)
+    expect(retired?.supersededBy).toBeTruthy()
+    const target = all.find(fact => fact.id === retired?.supersededBy)
+    expect(target?.object).toBe('工程师')
+    expect(target?.supersededBy).toBeNull()
+    expect(store!.activeFacts('主人').some(fact => fact.predicate === '城市' && fact.object === '上海')).toBe(true)
+  })
+
+  it('recompiles human block from approved user suggestions', async () => {
+    const llm = fakeLlm(['初始画像\n主人喜欢简洁'])
+    const consolidator = setup(llm)
+    store!.setCoreBlock('human', '初始画像')
+    const { suggestion } = store!.addSuggestion({ kind: 'user', content: '喜欢简洁' })
+    store!.resolveSuggestion(suggestion.id, 'approved')
+    // pending 建议不参与重编译
+    store!.addSuggestion({ kind: 'user', content: '未批准的建议' })
+
+    const report = await consolidator.run()
+
+    expect(report.recompiled).toBe(true)
+    expect(llm.calls).toBe(1)
+    expect(store!.getCoreBlock('human')?.text).toBe('初始画像\n主人喜欢简洁')
+    // 已消费的建议置 rejected；pending 原样保留
+    expect(store!.listSuggestions('approved')).toHaveLength(0)
+    expect(store!.listSuggestions('rejected').map(row => row.id)).toContain(suggestion.id)
+    expect(store!.listSuggestions('pending')).toHaveLength(1)
+  })
+
+  it('skips gracefully when llm is null (nothing lost)', async () => {
+    const consolidator = setup(NULL_LLM)
+    addNoteBackdated('旧便签', 2 * DAY_MS)
+    const { suggestion } = store!.addSuggestion({ kind: 'user', content: '喜欢简洁' })
+    store!.resolveSuggestion(suggestion.id, 'approved')
+
+    const report = await consolidator.run()
+
+    expect(report).toEqual({ distilled: 0, superseded: 0, linked: 0, recompiled: false, decayed: 0, archived: 0, embedded: 0 })
+    // 便签保留、建议保留（下轮再试）
+    expect(store!.notesBetween(weekAgoIso(), dayAgoIso())).toHaveLength(1)
+    expect(store!.listSuggestions('approved')).toHaveLength(1)
+    expect(store!.getCoreBlock('human')).toBeNull()
+  })
+
+  it('settles decay at the end of the pipeline with config values, sparing pinned cards', async () => {
+    const config: ConsolidateConfig = { ...CONFIG, decayLambdaPerDay: 0.02, decayArchiveBelow: 0.2 }
+    const consolidator = setup(NULL_LLM, config)
+    const settleSpy = vi.spyOn(store!, 'settleDecay')
+    // 200 天未访问：strength 1 × e^(-0.02×200) ≈ 0.018 < 0.2 → 归档
+    const stale = store!.insertCard({ summary: '陈旧记忆', content: '陈旧记忆 全文', strength: 1 })
+    backdateCard(stale.id, 200 * DAY_MS)
+    // 同样陈旧的 pinned 卡：免疫衰减
+    const pinned = store!.insertCard({ summary: '钉住的陈旧记忆', content: '钉住的陈旧记忆 全文', strength: 1, pinned: true })
+    backdateCard(pinned.id, 200 * DAY_MS)
+
+    const before = Date.now()
+    const report = await consolidator.run()
+
+    expect(settleSpy).toHaveBeenCalledTimes(1)
+    const [refIso, lambda, below] = settleSpy.mock.calls[0]!
+    expect(lambda).toBe(0.02)
+    expect(below).toBe(0.2)
+    expect(Math.abs(Date.parse(refIso) - before)).toBeLessThan(5000)
+    expect(report.decayed).toBe(1)
+    expect(report.archived).toBe(1)
+    const staleAfter = store!.getCard(stale.id)!
+    expect(staleAfter.archived).toBe(true)
+    expect(staleAfter.strength).toBeLessThan(0.2)
+    const pinnedAfter = store!.getCard(pinned.id)!
+    expect(pinnedAfter.archived).toBe(false)
+    expect(pinnedAfter.strength).toBe(1)
+    // 水位已落：同刻再跑是 no-op
+    const second = await consolidator.run()
+    expect(second.decayed).toBe(0)
+    expect(second.archived).toBe(0)
+  })
+
+  it('survives a settleDecay failure without breaking the rest of the pipeline', async () => {
+    const llm = fakeLlm(['[CARD] 主人怕吵'])
+    const consolidator = setup(llm)
+    addNoteBackdated('便签：楼下装修很吵', 2 * DAY_MS)
+    vi.spyOn(store!, 'settleDecay').mockImplementation(() => {
+      throw new Error('disk on fire')
+    })
+
+    const report = await consolidator.run()
+
+    expect(report.distilled).toBe(1)
+    expect(report.decayed).toBe(0)
+    expect(report.archived).toBe(0)
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('settle decay'))
+  })
+
+  it('falls back to schema defaults when decay config is absent', async () => {
+    const consolidator = setup(NULL_LLM)
+    const settleSpy = vi.spyOn(store!, 'settleDecay')
+
+    await consolidator.run()
+
+    expect(settleSpy).toHaveBeenCalledWith(expect.any(String), 0.02, 0.2)
+  })
+
+  it('tick respects idle watermark and is reentry-safe', async () => {
+    const llm = fakeLlm(['[CARD] 旧闻'])
+    const consolidator = setup(llm)
+    addNoteBackdated('旧便签', 2 * DAY_MS)
+
+    // 5 分钟前还有活动，idle 阈值 30 分钟 → 不执行
+    store!.setMeta('activity:last', new Date(Date.now() - 5 * 60_000).toISOString())
+    expect(await consolidator.tick()).toBe(false)
+    expect(llm.calls).toBe(0)
+
+    // 静默 40 分钟 → 执行；并发的第二个 tick 被防重入挡下
+    store!.setMeta('activity:last', new Date(Date.now() - 40 * 60_000).toISOString())
+    const first = consolidator.tick()
+    const second = consolidator.tick()
+    expect(await second).toBe(false)
+    expect(await first).toBe(true)
+    expect(llm.calls).toBe(1)
+    expect(store!.notesBetween(weekAgoIso(), dayAgoIso())).toHaveLength(0)
+  })
+})

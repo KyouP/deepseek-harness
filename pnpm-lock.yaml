@@ -3699,6 +3699,34 @@ importers:
         specifier: workspace:^
         version: link:../../util/launch-environment
 
+  packages/dsh-mem-enhance:
+    dependencies:
+      '@deepseek-ai/dsh-home-paths':
+        specifier: workspace:^
+        version: link:../util/home-paths
+      '@deepseek-ai/schemastery':
+        specifier: link:../../vendor/schemastery
+        version: link:../../vendor/schemastery
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../vendor/cordis
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-llm':
+        specifier: workspace:^
+        version: link:../llm/llm
+      '@deepseek-ai/dsh-session':
+        specifier: workspace:^
+        version: link:../core/session
+      '@deepseek-ai/dsh-system-prompt':
+        specifier: workspace:^
+        version: link:../core/system-prompt
+      '@deepseek-ai/dsh-tools':
+        specifier: workspace:^
+        version: link:../core/tools
+
   packages/dsh-web-ui/shared:
     devDependencies:
       '@deepseek-ai/dsh-client-runtime':
@@ -5548,34 +5576,6 @@ importers:
       '@modelcontextprotocol/server-filesystem':
         specifier: ^2026.7.4
         version: 2026.7.10(zod@4.4.3)
-
-  packages/mem-enhance:
-    dependencies:
-      '@deepseek-ai/dsh-home-paths':
-        specifier: workspace:^
-        version: link:../util/home-paths
-      '@deepseek-ai/schemastery':
-        specifier: link:../../vendor/schemastery
-        version: link:../../vendor/schemastery
-    devDependencies:
-      '@deepseek-ai/cordis':
-        specifier: workspace:^
-        version: link:../../vendor/cordis
-      '@deepseek-ai/dsh-invariants':
-        specifier: workspace:^
-        version: link:../runtime-diagnostics/invariants
-      '@deepseek-ai/dsh-llm':
-        specifier: workspace:^
-        version: link:../llm/llm
-      '@deepseek-ai/dsh-session':
-        specifier: workspace:^
-        version: link:../core/session
-      '@deepseek-ai/dsh-system-prompt':
-        specifier: workspace:^
-        version: link:../core/system-prompt
-      '@deepseek-ai/dsh-tools':
-        specifier: workspace:^
-        version: link:../core/tools
 
   packages/plan/plan-mode:
     dependencies:

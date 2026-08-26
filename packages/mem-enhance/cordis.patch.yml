@@ -1,8 +1,0 @@
-# The mem-enhance bundle patch: mounts the H-MEM persona memory plugin as one
-# insert row over whatever the earlier bundle layers established. The row's
-# identity is stable; profiles and overlays restate `config` to tune it.
-
-- insert:
-    - id: mem-enhance
-      name: 'mem-enhance'
-      config: {}

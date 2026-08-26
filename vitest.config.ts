@@ -84,7 +84,7 @@ const pwshCoverageExclusions = spawnSync(resolvePwshPath(), ['-NoLogo', '-NoProf
 
 const testIncludes = [
   'packages/*/*/tests/**/*.spec.{ts,tsx}',
-  'packages/mem-enhance/tests/**/*.spec.{ts,tsx}',
+  'packages/dsh-mem-enhance/tests/**/*.spec.{ts,tsx}',
   'apps/*/tests/**/*.spec.ts',
   'examples/*/tests/**/*.spec.ts',
   'scripts/**/*.spec.ts',
@@ -164,12 +164,12 @@ export default defineConfig({
       // executable code; vendor/ and examples/ are out of scope (examples are
       // exercised by the demo smoke test instead).
       // .tsx: client components are gated like everything else (jsdom lane).
-      include: ['packages/*/*/src/**/*.{ts,tsx}', 'packages/mem-enhance/src/**/*.{ts,tsx}'],
+      include: ['packages/*/*/src/**/*.{ts,tsx}', 'packages/dsh-mem-enhance/src/**/*.{ts,tsx}'],
       // Types-only files have no runtime coverage. Importing self-executing bins/workers would boot
       // them inside the unit process, so real subprocess/Worker tests cover their thin entry glue.
       exclude: [
         'packages/*/*/src/types.ts',
-        'packages/mem-enhance/src/store/types.ts',
+        'packages/dsh-mem-enhance/src/store/types.ts',
         'packages/*/*/src/bin.ts',
         'packages/*/*/src/worker.ts',
         // Dynamic Host/Client composition is covered by its focused lifecycle

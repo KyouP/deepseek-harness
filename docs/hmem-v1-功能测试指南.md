@@ -25,7 +25,7 @@ pnpm dsh --profile web    # 或：pnpm dsh --profile tui
 **启动观察点（测试 0）：**
 
 - [ ] dsh 正常启动，无红色报错
-- [ ] 日志中**没有** `mem-enhance` 相关的 warning（有 warning 说明数据库打开失败，进入降级模式，先排查再继续）
+- [ ] 日志中**没有** `dsh-mem-enhance` 相关的 warning（有 warning 说明数据库打开失败，进入降级模式，先排查再继续）
 
 > 建议：先用一个全新的 hmem.db 测一遍（删除 `F:\dsh_workspace\.dsh\storages\hmem.db` 后启动），最后再测「已有数据的持久性」。
 
@@ -163,7 +163,7 @@ pnpm dsh --profile web    # 或：pnpm dsh --profile tui
 
 **通过标准**：
 - [ ] dsh **正常启动**，对话功能完全可用
-- [ ] 日志有一条 mem-enhance 的 warning（打不开数据库）
+- [ ] 日志有一条 dsh-mem-enhance 的 warning（打不开数据库）
 - [ ] 对话中模型没有记忆能力，但其余一切正常
 - [ ] 恢复：退出 dsh，删掉垃圾文件，`hmem.db.bak` 改回原名，重启后记忆完整回来
 
@@ -339,5 +339,5 @@ node -e "const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('F
 |---|---|
 | 模型从不主动记东西 | v2 起每轮结束会自动沉淀（需 Ollama 在线）。若 Ollama 没起，沉淀静默跳过，退化为 v1 的纯显式模式——见第八阶段 |
 | 中文检索不命中 | v2 已用 trigram 分词解决句中词命中；仍不命中时换特征关键词重试 |
-| 日志有 `mem-enhance` warning | 数据库打不开（路径/权限/损坏），记忆功能整体降级，见测试 6.2 |
+| 日志有 `dsh-mem-enhance` warning | 数据库打不开（路径/权限/损坏），记忆功能整体降级，见测试 6.2 |
 | 改了 memory 代码没生效 | 需要在仓库重新 `pnpm build:lib:host`（插件入口是 `lib/index.js`），无需重装 profile |

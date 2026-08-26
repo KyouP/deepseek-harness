@@ -1,7 +1,7 @@
 # H-MEM 功能测试清单与方案（全量 master 版）
 
 > 适用版本：`worktree-hmem-v1` 分支 @ 62f2baccf6（v2 已合入，tag `hmem-v2.0.0`）
-> 本文定位：**全量逐项功能清单 + 测试方案**。所有数值均核对于代码（`packages/mem-enhance/src/`、`packages/mem-enhance/src/store/`）。
+> 本文定位：**全量逐项功能清单 + 测试方案**。所有数值均核对于代码（`packages/dsh-mem-enhance/src/`、`packages/dsh-mem-enhance/src/store/`）。
 > 与既有文档的关系：`docs/hmem-v1-功能测试指南.md` 是**分阶段 walkthrough**（边聊边观察的操作剧本，含 v1 阶段 1-7、v2 阶段 8-15）；本文是**全量 master 清单**，颗粒度更细，按组编号可独立勾选。清单项末尾标注「指南阶段 N」表示该项有对应的详细操作剧本可参考，不重复抄写。
 > 测试方式：与 dsh 中的模型自然语言对话驱动工具调用 + `node:sqlite` 直查数据库验证。
 
@@ -15,7 +15,7 @@
 - [ ] **S2 备份/隔离数据库** — 数据库路径由 `resolveDbPath` 决定：config `dbPath` 非空时用之，否则为 `$DSH_HOME/storages/hmem.db`（即 `F:\dsh_workspace\.dsh\storages\hmem.db`）。测试前退出 dsh 并复制备份：`Copy-Item F:\dsh_workspace\.dsh\storages\hmem.db F:\dsh_workspace\.dsh\storages\hmem.db.bak`；要全新库则备份后删除原文件，启动时自动重建（含 meta / suggestions / cards_fts_tri 迁移）。
 - [ ] **S3 安装本地 LLM** — `ollama pull qwen3.5:4b`（默认提炼模型，沉淀/巩固/画像重编译用）；向量通道测试另需 `ollama pull bge-m3`。保持 `ollama serve` 运行（默认 `http://127.0.0.1:11434`）。
 - [ ] **S4 代码为最新构建** — 仓库内 `pnpm install && pnpm build:lib:host`（插件入口是构建产物 `lib/index.js`）。
-- [ ] **S5 启动冒烟** — `pnpm dsh --profile web`（或 tui）：dsh 正常启动、日志**无** `mem-enhance` warning（有 warning 说明 db 打不开、记忆功能整体降级，先排查）。（指南测试 0）
+- [ ] **S5 启动冒烟** — `pnpm dsh --profile web`（或 tui）：dsh 正常启动、日志**无** `dsh-mem-enhance` warning（有 warning 说明 db 打不开、记忆功能整体降级，先排查）。（指南测试 0）
 
 ### 2. 通用验证方法（数据库直查）
 
@@ -58,8 +58,8 @@ SELECT key, value FROM meta;                                                    
 
 自动机制默认"静默"，测试时用这三个手段让它可见：
 
-1. **dsh 日志（info 级，零配置）**：每次过了门控的沉淀尝试都会记录 `mem-enhance: sediment session=… turn=… -> stored/empty/failed`；每轮巩固记录 `mem-enhance: consolidation report distilled=… superseded=… linked=… recompiled=… decayed=… archived=… embedded=…`。门控 skip（冷却/日上限/去重/子代理等常态路径）不打日志——没看到 attempt 日志时按 §3 的 meta 键逐项排查门控。
-2. **`llmTraceFile`（LLM 交互全量留痕）**：mem-enhance config 加 `llmTraceFile: 'F:\\dsh_workspace\\sub_dsh_workspace\\hmem-trace.jsonl'` 后，每次 complete/embed 调用落一行 JSONL：`{ts, kind, backend, system, user, response, ms}`（embed 记录截断输入与向量数，不落向量本体）。`auto` 链每路降级尝试各自一条（`backend: ollama/openai/main`，`response: null` 表示该路失败走了下一路）。**含会话原文，仅测试期开启**；trace 文件不可写时静默跳过，不影响功能。配合 `Get-Content hmem-trace.jsonl -Wait -Tail 5` 实时跟踪。
+1. **dsh 日志（info 级，零配置）**：每次过了门控的沉淀尝试都会记录 `dsh-mem-enhance: sediment session=… turn=… -> stored/empty/failed`；每轮巩固记录 `dsh-mem-enhance: consolidation report distilled=… superseded=… linked=… recompiled=… decayed=… archived=… embedded=…`。门控 skip（冷却/日上限/去重/子代理等常态路径）不打日志——没看到 attempt 日志时按 §3 的 meta 键逐项排查门控。
+2. **`llmTraceFile`（LLM 交互全量留痕）**：dsh-mem-enhance config 加 `llmTraceFile: 'F:\\dsh_workspace\\sub_dsh_workspace\\hmem-trace.jsonl'` 后，每次 complete/embed 调用落一行 JSONL：`{ts, kind, backend, system, user, response, ms}`（embed 记录截断输入与向量数，不落向量本体）。`auto` 链每路降级尝试各自一条（`backend: ollama/openai/main`，`response: null` 表示该路失败走了下一路）。**含会话原文，仅测试期开启**；trace 文件不可写时静默跳过，不影响功能。配合 `Get-Content hmem-trace.jsonl -Wait -Tail 5` 实时跟踪。
 3. **模型时间感知（time-context 插件）**：dsh 默认组合**不挂载** `@deepseek-ai/dsh-time-context`，对话中的模型不知道当前时间（会把日期搞错）。在 profile 的 `cordis.patch.yml` 追加（web profile 已配好）：
 
    ```yaml
@@ -87,7 +87,7 @@ SELECT key, value FROM meta;                                                    
 | 便签蒸馏窗口（24h~7 天前） | `UPDATE scratchpad SET created_at='<2天前的ISO时间>'` |
 | 周期审查（默认 5 回合） | `INSERT OR REPLACE INTO meta (key,value) VALUES ('review:turns','4')`，再聊 1 个顶层回合 |
 | 纪念日预热 | `UPDATE cards SET recorded_at='<去年同月同日的ISO时间>' WHERE id='<卡id>'` |
-| 冷却/日限/审查间隔等 | 也可直接改 config（`cordis.patch.yml` 的 mem-enhance config）把 `sedimentCooldownMinutes` / `consolidateIdleMinutes` / `reviewIntervalTurns` 调小后重启 |
+| 冷却/日限/审查间隔等 | 也可直接改 config（`cordis.patch.yml` 的 dsh-mem-enhance config）把 `sedimentCooldownMinutes` / `consolidateIdleMinutes` / `reviewIntervalTurns` 调小后重启 |
 
 ### 4. 分组与执行顺序
 
@@ -107,14 +107,14 @@ SELECT key, value FROM meta;                                                    
 
 ### A 组：启动、持久性与兜底
 
-- [ ] **A1 正常启动挂载** — 全新 hmem.db → 启动 dsh，问「你是谁」→ 正常对话，日志无 mem-enhance warning → 验证：db 文件已创建；`SELECT name FROM sqlite_master WHERE type IN ('table','virtual table')` 含 cards / facts / links / commitments / core_blocks / scratchpad / meta / suggestions / cards_fts / cards_fts_tri。（指南测试 0）
-- [ ] **A2 数据库损坏降级** ★ — 退出 dsh，把 hmem.db 改名备份、原位置写垃圾文本文件 → 启动 dsh → 正常启动、对话可用、日志一条 mem-enhance warning、模型无记忆能力 → 验证：日志 warning 文案 `cannot open memory store ... memory features disabled`；恢复备份后重启，记忆完整回来。（指南测试 6.2）
+- [ ] **A1 正常启动挂载** — 全新 hmem.db → 启动 dsh，问「你是谁」→ 正常对话，日志无 dsh-mem-enhance warning → 验证：db 文件已创建；`SELECT name FROM sqlite_master WHERE type IN ('table','virtual table')` 含 cards / facts / links / commitments / core_blocks / scratchpad / meta / suggestions / cards_fts / cards_fts_tri。（指南测试 0）
+- [ ] **A2 数据库损坏降级** ★ — 退出 dsh，把 hmem.db 改名备份、原位置写垃圾文本文件 → 启动 dsh → 正常启动、对话可用、日志一条 dsh-mem-enhance warning、模型无记忆能力 → 验证：日志 warning 文案 `cannot open memory store ... memory features disabled`；恢复备份后重启，记忆完整回来。（指南测试 6.2）
 - [ ] **A3 全量持久性** — 已有画像/卡片/承诺 → 退出重启、开新会话 → 问「我叫什么/我喜欢什么/我有什么待办」全部答出 → 验证：SQL 直查各表行数重启前后一致。（指南测试 6.1）
 - [ ] **A4 种子只首次生效** — config 配 `persona` 种子 → 全新库启动，人格块=种子；模型 `memory_update_core` 改过 persona 后重启（种子仍在 config）→ 人格块保持模型改写版，不被种子覆盖 → 验证：`SELECT name, revision, text FROM core_blocks`（revision 只增不减）。（指南阶段 1）
 
 ### B 组：十五个工具逐一
 
-> 代码实际注册的 15 个工具（`grep "name: 'memory_" packages/mem-enhance/src/` 核实）：memory_store、memory_note、memory_recall、memory_expand、memory_forget、memory_update_core、memory_close_commitment、memory_pin、memory_unpin、memory_browse、memory_suggest、memory_review_done、memory_suggestions、memory_export、memory_import。
+> 代码实际注册的 15 个工具（`grep "name: 'memory_" packages/dsh-mem-enhance/src/` 核实）：memory_store、memory_note、memory_recall、memory_expand、memory_forget、memory_update_core、memory_close_commitment、memory_pin、memory_unpin、memory_browse、memory_suggest、memory_review_done、memory_suggestions、memory_export、memory_import。
 
 **B1 memory_store**
 
@@ -356,7 +356,7 @@ SELECT key, value FROM meta;                                                    
 
 | 数值 | 出处 |
 |---|---|
-| 33 项 config 默认值（240/8/30/0.05/5/30/0.02/0.2/1800/1200/800/3000/2500/20 等） | `mem-enhance/src/index.ts` Config schema |
+| 33 项 config 默认值（240/8/30/0.05/5/30/0.02/0.2/1800/1200/800/3000/2500/20 等） | `dsh-mem-enhance/src/index.ts` Config schema |
 | 显著性公式 0.3/0.3/0.2/0.2，分档 0.3 / 0.7 | `salience.ts` |
 | 排序权重 0.5/0.2/0.1/0.1、pin +0.15、workspace +0.1、向量 ≤0.15、floor 0.05、事实 0.3+0.1·conf、低置信 <0.7 | `recall.ts` |
 | 自动召回 ≥8 字符、≤5 条、预算 1800 | `auto-recall.ts` |
@@ -364,7 +364,7 @@ SELECT key, value FROM meta;                                                    
 | 审查间隔 5 回合、粘性注入、子代理门控 | `review.ts` / `workspace.ts` |
 | 沉淀 240/8/30min/夜间翻倍/重试 ≤5/尾部 900 字 | `sediment.ts` |
 | 巩固 30min 静默 + 5min 轮询、蒸馏窗 24h~7d、回填 ≤20、步骤 ⓪-⑦ | `consolidate.ts` / `index.ts` |
-| 衰减 λ=0.02/天、归档线 0.2、复苏 strength≥0.5、访问 +0.1 封顶 5 | `mem-enhance/src/store/index.ts`（settleDecay/reviveCard/touchCards） |
+| 衰减 λ=0.02/天、归档线 0.2、复苏 strength≥0.5、访问 +0.1 封顶 5 | `dsh-mem-enhance/src/store/index.ts`（settleDecay/reviveCard/touchCards） |
 | 写闸 8 类 reason、注入闸规则 | `sanitize.ts` |
 | 建链共现 ≥2、关键词 ≤8 | `links.ts` |
 | browse 默认 20 条、单条 ≤500 / 总 ≤8000 字符 | `browse.ts` / `tools-browse.ts` |
